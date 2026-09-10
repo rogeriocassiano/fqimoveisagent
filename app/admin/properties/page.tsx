@@ -13,6 +13,32 @@ function Photo({ src, alt, style }: { src?: string; alt: string; style?: React.C
   return <img src={src} alt={alt} style={{ ...style, objectFit: "cover" }} onError={() => setErr(true)} />;
 }
 
+function PropertyCard({ p, onClick }: { p: Property; onClick: () => void }) {
+  const [idx, setIdx] = useState(0);
+  const photos = p.payload?.photos ?? [];
+  const hasMany = photos.length > 1;
+  const prev = () => setIdx((idx - 1 + photos.length) % photos.length);
+  const next = () => setIdx((idx + 1) % photos.length);
+  return (
+    <button className="card" onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%", position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <Photo src={photos[idx]} alt={p.title} style={{ width: "100%", height: 160, borderRadius: 12 }} />
+        {hasMany && (
+          <>
+            <button onClick={(e) => { e.stopPropagation(); prev(); }} className="ghost" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", padding: "8px 12px", background: "rgba(0,0,0,.5)", borderRadius: "50%" }}>‹</button>
+            <button onClick={(e) => { e.stopPropagation(); next(); }} className="ghost" style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", padding: "8px 12px", background: "rgba(0,0,0,.5)", borderRadius: "50%" }}>›</button>
+            <span style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,.6)", padding: "2px 8px", borderRadius: 8, fontSize: ".75rem" }}>{idx + 1}/{photos.length}</span>
+          </>
+        )}
+      </div>
+      <h3 style={{ margin: "0 0 4px" }}>{p.title}</h3>
+      <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{p.neighborhood} • {p.bedrooms ? `${p.bedrooms} quartos` : "—"}</p>
+      <p style={{ color: "var(--accent)", fontWeight: 700, margin: 0 }}>R$ {p.sale_price?.toLocaleString("pt-BR") || "—"}</p>
+      <p style={{ color: "var(--muted)", fontSize: ".75rem" }}>Ref: {p.reference}</p>
+    </button>
+  );
+}
+
 export default function PropertiesPage() {
   const router = useRouter();
   const [properties, setProperties] = useState<Property[]>([]);
@@ -76,15 +102,7 @@ export default function PropertiesPage() {
       <section>
         <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Imóveis cadastrados</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-          {properties.map((p) => (
-            <button key={p.id} className="card" onClick={() => setSelected(p)} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%" }}>
-              <Photo src={p.payload?.photos?.[0]} alt={p.title} style={{ width: "100%", height: 160, borderRadius: 12 }} />
-              <h3 style={{ margin: "0 0 4px" }}>{p.title}</h3>
-              <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{p.neighborhood} • {p.bedrooms ? `${p.bedrooms} quartos` : "—"}</p>
-              <p style={{ color: "var(--accent)", fontWeight: 700, margin: 0 }}>R$ {p.sale_price?.toLocaleString("pt-BR") || "—"}</p>
-              <p style={{ color: "var(--muted)", fontSize: ".75rem" }}>Ref: {p.reference}</p>
-            </button>
-          ))}
+          {properties.map((p) => <PropertyCard key={p.id} p={p} onClick={() => setSelected(p)} />)}
         </div>
       </section>
 
@@ -109,7 +127,7 @@ export default function PropertiesPage() {
               <div><strong>Suítes</strong><p>{selected.suites}</p></div>
               <div><strong>Banheiros</strong><p>{selected.bathrooms}</p></div>
               <div><strong>Vagas</strong><p>{selected.parking_spaces}</p></div>
-              <div><strong>Área</strong><p>{selected.area} m²</p></div>
+              <div><strong>Área</strong><p>{selected.area ? `${selected.area} m²` : "—"}</p></div>
             </div>
             <p style={{ color: "var(--muted)", margin: "16px 0" }}>{selected.payload?.description}</p>
             {selected.payload?.unit_features && <p style={{ color: "var(--muted)", margin: "8px 0" }}><strong>Unidade:</strong> {selected.payload.unit_features}</p>}

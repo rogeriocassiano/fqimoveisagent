@@ -37,6 +37,32 @@ export async function extractTextFromFile(file: File): Promise<string> {
     return buffer.toString("utf-8");
   }
 
+  if (file.type.startsWith("image/")) {
+    const env = serverEnv();
+    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    const response = await ai.models.generateContent({
+      model: env.GEMINI_MODEL,
+      contents: [
+        { text: "Descreva o conteúdo desta imagem em português. Se houver texto, transcreva-o. Se for um documento, extraia as informações principais." },
+        { inlineData: { mimeType: file.type, data: buffer.toString("base64") } },
+      ],
+    });
+    return response.text?.trim() || "";
+  }
+
+  if (file.type.startsWith("video/")) {
+    const env = serverEnv();
+    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    const response = await ai.models.generateContent({
+      model: env.GEMINI_MODEL,
+      contents: [
+        { text: "Analise este vídeo e descreva o conteúdo, falas e informações principais em português." },
+        { inlineData: { mimeType: file.type, data: buffer.toString("base64") } },
+      ],
+    });
+    return response.text?.trim() || "";
+  }
+
   throw new Error("Formato de arquivo não suportado");
 }
 

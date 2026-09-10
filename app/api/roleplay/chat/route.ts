@@ -4,24 +4,23 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   const db = adminDb();
-  const { moduloId, perfilId, messages } = await req.json();
-  if (!moduloId || !perfilId || !Array.isArray(messages)) {
-    return NextResponse.json({ error: "Módulo, perfil e mensagens são obrigatórios" }, { status: 400 });
-  }
+  const { sessionId, message } = await req.json();
+  if (!sessionId || !message) return NextResponse.json({ error: "sessionId e message são obrigatórios" }, { status: 400 });
 
-  const { data: modulo } = await db.from("training_modules").select("*").eq("id", moduloId).single();
-  const { data: perfil } = await db.from("training_profiles").select("*").eq("id", perfilId).single();
-  const { data: properties } = await db.from("properties").select("*").eq("active", true).limit(20);
+  const { data: session, error } = await db.from("roleplay_sessions").select("*, training_modules(*), training_profiles(*)").eq("id", sessionId).single();
+  if (error || !session) return NextResponse.json({ error: error?.message || "Sessão não encontrada" }, { status: 404 });
 
-  const prompt = buildSystemPrompt(modulo, perfil, properties ?? []);
-  const ultima = messages.at(-1).content || "";
+  const mensagens = (session.mensagens as { role: string; content: string }[]) ?? [];
+  mensagens.push({ role: "user", content: message });
 
-  const contexto = messages.map((m: { role: string; content: string }) => `${m.role === "user" ? "CORRETOR" : "CLIENTE"}: ${m.content}`).join("\n");
-  const text = `ROLEPLAY EM ANDAMENTO:\n\n${contexto}\n\nCORRETOR: ${ultima}\n\nResponda como o CLIENTE, de forma natural, ou, se o corretor escreveu "ENCERRAR TREINO", dê o feedback em JSON conforme as regras.`;
+  const contexto = mensagens.map((m: { role: string; content: string }) => `${m.role === "user" ? "CORRETOR" : "CLIENTE"}: ${m.content}`).join("\n");
+  const prompt = buildSystemPrompt(session.training_modules, session.training_profiles, []);
+  const text = `ROLEPLAY EM ANDAMENTO:\n\n${contexto}\n\nCORRETOR: ${message}\n\nResponda como o CLIENTE, de forma natural, ou, se o corretor escreveu "ENCERRAR TREINO", dê o feedback em JSON conforme as regras.`;
 
   const response = await answerWithGemini(text, "", prompt);
 
-  if (ultima.toUpperCase().includes("ENCERRAR TREINO")) {
+  if (message.toUpperCase().includes("ENCERRAR TREINO")) {
+    await db.from("roleplay_sessions").update({ mensagens }).eq("id", sessionId);
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const feedback = JSON.parse(jsonMatch[0]);
@@ -30,11 +29,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ feedback: { nota: 0, feedback_geral: "Não foi possível avaliar. Tente novamente." } });
   }
 
+  mensagens.push({ role: "assistant", content: response });
+  await db.from("roleplay_sessions").update({ mensagens }).eq("id", sessionId);
+
   return NextResponse.json({ message: response });
 }
 
 function buildSystemPrompt(modulo: Record<string, string | number | null>, perfil: Record<string, string | number | null>, properties: Record<string, string | number | null>[]) {
-  const catalogo = properties.map(p => `- ${p.name} | Endereço: ${p.address || '-'} | Preço: R$ ${p.price?.toLocaleString('pt-BR') || 'sob consulta'} | ${p.bedrooms} quartos | ${p.area}m² | Construtora: ${p.builder || '-'} | Status: ${p.status || 'disponível'}`).join('\n') || 'Nenhum apartamento cadastrado no momento.';
+  const catalogo = properties.map(p => `- ${p.title} | Bairro: ${p.neighborhood || '-'} | Preço: R$ ${p.sale_price?.toLocaleString('pt-BR') || 'sob consulta'} | ${p.bedrooms} quartos | ${p.area}m² | Ref: ${p.reference} | Status: ${p.status || 'disponível'}`).join('\n') || 'Nenhum apartamento cadastrado no momento.';
   return `Você é um CLIENTE em um roleplay de treinamento de vendas para corretores da FQ Imóveis.
 
 PERSONAGEM: ${perfil.nome} (${perfil.negocio})

@@ -19,10 +19,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let uri = "";
     let file: File | undefined;
 
+    const normalizeType = (t: string): typeof type => {
+      if (t === "image" || t === "video") return "document";
+      if (t === "url" || t === "document" || t === "audio" || t === "text") return t as typeof type;
+      return "text";
+    };
+
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       const t = form.get("type");
-      if (t === "url" || t === "document" || t === "audio" || t === "text") type = t as typeof type;
+      type = normalizeType(t as string);
       title = (form.get("title") as string) || "";
       content = (form.get("content") as string) || "";
       uri = (form.get("uri") as string) || "";

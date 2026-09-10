@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -13,6 +13,8 @@ type Agent = {
   created_at: string;
 };
 
+type SourceType = "text" | "url" | "document" | "audio" | "image" | "video";
+
 export default function AdminPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -20,6 +22,10 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [improving, setImproving] = useState(false);
+  const [sourceAgentId, setSourceAgentId] = useState("");
+  const [sourceForm, setSourceForm] = useState<{ type: SourceType; title: string; content: string; uri: string; file?: File }>({ type: "document", title: "", content: "", uri: "" });
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1];
@@ -29,8 +35,29 @@ export default function AdminPage() {
   useEffect(() => {
     fetch("/api/agents")
       .then((r) => r.json())
-      .then((data) => setAgents(data.agents ?? []));
+      .then((data) => { setAgents(data.agents ?? []); setSourceAgentId(data.agents?.[0]?.id ?? ""); });
   }, []);
+
+  async function addSourceToAgent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sourceAgentId) { alert("Selecione um agente"); return; }
+    setSourceLoading(true);
+    const body = new FormData();
+    body.append("type", sourceForm.type);
+    body.append("title", sourceForm.title);
+    if (sourceForm.type === "text") body.append("content", sourceForm.content);
+    if (sourceForm.type === "url") body.append("uri", sourceForm.uri);
+    if (sourceForm.file) body.append("file", sourceForm.file);
+    const res = await fetch(`/api/agents/${sourceAgentId}/sources`, { method: "POST", body });
+    const data = await res.json();
+    setSourceLoading(false);
+    if (res.ok) {
+      setSourceForm({ type: "document", title: "", content: "", uri: "", file: undefined });
+      alert("Fonte adicionada! Clique em 'Treinar' na página do agente.");
+    } else {
+      alert(data.error || "Erro ao adicionar fonte");
+    }
+  }
 
   async function suggest() {
     setSuggesting(true);
@@ -128,6 +155,44 @@ export default function AdminPage() {
             <button type="button" onClick={suggest} disabled={suggesting} className="ghost">{suggesting ? "Gerando..." : "✨ Sugerir com IA"}</button>
             <button type="submit" disabled={loading}>{loading ? "Criando..." : "Criar agente"}</button>
           </div>
+        </form>
+      </section>
+
+      <section className="card" style={{ marginBottom: 32 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <span style={{ width: 36, height: 36, borderRadius: 10, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>📚</span>
+          <h2 style={{ margin: 0 }}>Adicionar conhecimento ao agente</h2>
+        </div>
+        <form onSubmit={addSourceToAgent} style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <select value={sourceAgentId} onChange={(e) => setSourceAgentId(e.target.value)} required>
+              <option value="">Selecione o agente</option>
+              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <select value={sourceForm.type} onChange={(e) => setSourceForm({ ...sourceForm, type: e.target.value as SourceType, file: undefined })}>
+              <option value="text">Texto</option>
+              <option value="url">Site / URL</option>
+              <option value="document">PDF / Excel / TXT</option>
+              <option value="audio">Áudio</option>
+              <option value="image">Imagem</option>
+              <option value="video">Vídeo</option>
+            </select>
+            <input value={sourceForm.title} onChange={(e) => setSourceForm({ ...sourceForm, title: e.target.value })} placeholder="Título da fonte" required />
+          </div>
+          {sourceForm.type === "text" && (
+            <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...)" rows={5} />
+          )}
+          {sourceForm.type === "url" && (
+            <input value={sourceForm.uri} onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })} placeholder="https://..." />
+          )}
+          {(sourceForm.type === "document" || sourceForm.type === "audio" || sourceForm.type === "image" || sourceForm.type === "video") && (
+            <div style={{ padding: 16, border: "1px dashed var(--line)", borderRadius: 12, textAlign: "center" }}>
+              <input ref={fileRef} type="file" accept={sourceForm.type === "document" ? ".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,.md" : sourceForm.type === "audio" ? "audio/*" : sourceForm.type === "image" ? "image/*" : "video/*"} onChange={(e) => setSourceForm({ ...sourceForm, file: e.target.files?.[0] })} style={{ display: "none" }} />
+              <button type="button" onClick={() => fileRef.current?.click()} className="ghost">📎 Escolher arquivo</button>
+              {sourceForm.file && <p style={{ color: "var(--muted)", marginTop: 8 }}>{sourceForm.file.name}</p>}
+            </div>
+          )}
+          <button type="submit" disabled={sourceLoading} style={{ justifySelf: "start" }}>{sourceLoading ? "Enviando..." : "Adicionar fonte"}</button>
         </form>
       </section>
 

@@ -9,7 +9,33 @@ type Perfil = { id: number; nome: string; negocio: string; emoji: string; dor: s
 type Imovel = { id: string; reference: string; title: string; sale_price: number; address?: string; neighborhood?: string; bedrooms?: number; suites?: number; bathrooms?: number; parking_spaces?: number; area?: number; url?: string; payload?: { photos?: string[]; description?: string; unit_features?: string; building_features?: string } };
 type Msg = { role: "user" | "assistant"; content: string };
 
-type Aba = "home" | "roleplay" | "produtos" | "historico";
+function PropertyCard({ i, onClick }: { i: Imovel; onClick: () => void }) {
+  const [idx, setIdx] = useState(0);
+  const photos = i.payload?.photos ?? [];
+  const hasMany = photos.length > 1;
+  const prev = () => setIdx((idx - 1 + photos.length) % photos.length);
+  const next = () => setIdx((idx + 1) % photos.length);
+  return (
+    <button className="card" onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%", position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        {photos[idx] ? <img src={photos[idx]} alt={i.title} style={{ width: "100%", height: 160, borderRadius: 12, objectFit: "cover" }} /> : <div style={{ height: 160, borderRadius: 12, background: "var(--panel)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>Sem foto</div>}
+        {hasMany && (
+          <>
+            <button onClick={(e) => { e.stopPropagation(); prev(); }} className="ghost" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", padding: "8px 12px", background: "rgba(0,0,0,.5)", borderRadius: "50%" }}>‹</button>
+            <button onClick={(e) => { e.stopPropagation(); next(); }} className="ghost" style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", padding: "8px 12px", background: "rgba(0,0,0,.5)", borderRadius: "50%" }}>›</button>
+            <span style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,.6)", padding: "2px 8px", borderRadius: 8, fontSize: ".75rem" }}>{idx + 1}/{photos.length}</span>
+          </>
+        )}
+      </div>
+      <h3 style={{ margin: "0 0 4px" }}>{i.title}</h3>
+      <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{i.neighborhood || i.address} • Ref: {i.reference}</p>
+      <p style={{ fontWeight: 700, color: "var(--accent)", margin: 0 }}>R$ {i.sale_price?.toLocaleString("pt-BR") || "—"}</p>
+      <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>{i.bedrooms ? `${i.bedrooms} quartos` : "—"} • {i.bathrooms ? `${i.bathrooms} banh` : "—"} • {i.parking_spaces ? `${i.parking_spaces} vagas` : "—"} • {i.area ? `${i.area}m²` : "—"}</p>
+    </button>
+  );
+}
+
+type Aba = "home" | "roleplay" | "produtos" | "ligar" | "historico";
 
 export default function AcademyPage() {
   const router = useRouter();
@@ -32,6 +58,11 @@ export default function AcademyPage() {
   const [sessaoAtiva, setSessaoAtiva] = useState(false);
   const [inicio, setInicio] = useState<number>(0);
   const [duracao, setDuracao] = useState(0);
+  const [sessaoId, setSessaoId] = useState<number | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [historico, setHistorico] = useState<any[]>([]);
+  const [chamando, setChamando] = useState(false);
+  const [criterio, setCriterio] = useState<number | null>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
   const timer = useRef<NodeJS.Timeout | null>(null);
 
@@ -55,27 +86,42 @@ export default function AcademyPage() {
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
   useEffect(() => { if (sessaoAtiva) { timer.current = setInterval(() => setDuracao(Math.floor((Date.now() - inicio) / 1000)), 1000); } else if (timer.current) { clearInterval(timer.current); } return () => { if (timer.current) clearInterval(timer.current); }; }, [sessaoAtiva, inicio]);
 
-  const iniciar = async () => {
+  const iniciar = async (modoLigacao = false) => {
     if (!moduloId || !perfilId) return;
-    setMsgs([]); setFeedback(null); setSessaoAtiva(true); setInicio(Date.now()); setDuracao(0); setAba("roleplay"); setLoading(true);
+    setMsgs([]); setFeedback(null); setSessaoAtiva(true); setInicio(Date.now()); setDuracao(0); setAba(modoLigacao ? "ligar" : "roleplay"); setChamando(modoLigacao); setLoading(true);
     const res = await fetch("/api/roleplay/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduloId, perfilId }) });
     const data = await res.json();
+    setSessaoId(data.sessionId);
     setMsgs([{ role: "assistant", content: data.message }]);
     setLoading(false);
   };
 
+  const encerrar = async () => {
+    if (!sessaoId) return;
+    setLoading(true);
+    await fetch("/api/roleplay/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: "ENCERRAR TREINO" }) });
+    const evalRes = await fetch("/api/roleplay/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId }) });
+    const evalData = await evalRes.json();
+    setFeedback(evalData.avaliacao);
+    setSessaoAtiva(false); setChamando(false); setAba("historico");
+    setLoading(false);
+    fetch("/api/roleplay/history").then(r => r.json()).then(d => setHistorico(d.sessions ?? []));
+  };
+
+  const carregarHistorico = () => fetch("/api/roleplay/history").then(r => r.json()).then(d => setHistorico(d.sessions ?? []));
+
   const enviar = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || !sessaoId) return;
     const texto = input.trim(); setInput("");
     const novas = [...msgs, { role: "user" as const, content: texto }];
     setMsgs(novas); setLoading(true);
-    const res = await fetch("/api/roleplay/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduloId, perfilId, messages: novas }) });
-    const data = await res.json();
-    if (data.feedback) {
-      setFeedback(data.feedback); setSessaoAtiva(false); setMsgs([]);
-    } else {
-      setMsgs(prev => [...prev, { role: "assistant", content: data.message }]);
+    if (texto.toUpperCase().includes("ENCERRAR TREINO")) {
+      await encerrar();
+      return;
     }
+    const res = await fetch("/api/roleplay/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: texto }) });
+    const data = await res.json();
+    if (data.message) setMsgs(prev => [...prev, { role: "assistant", content: data.message }]);
     setLoading(false);
   };
 
@@ -93,7 +139,7 @@ export default function AcademyPage() {
           <p style={{ color: "var(--muted)", fontSize: ".8rem" }}>Treinamento com IA</p>
         </div>
         <nav style={{ display: "flex", gap: 8 }}>
-          {["home", "produtos"].map(a => <button key={a} onClick={() => setAba(a as Aba)} className={aba === a ? "" : "ghost"} style={{ textTransform: "capitalize" }}>{a}</button>)}
+          {["home", "produtos", "ligar", "historico"].map(a => <button key={a} onClick={() => setAba(a as Aba)} className={aba === a ? "" : "ghost"} style={{ textTransform: "capitalize" }}>{a === "ligar" ? "📞 Ligar" : a === "historico" ? "📊 Histórico" : a}</button>)}
         </nav>
       </header>
 
@@ -128,7 +174,8 @@ export default function AcademyPage() {
 
             <div className="card" style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center" }}>
               <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{modulos.find(m => m.id === moduloId)?.titulo} com {perfis.find(p => p.id === perfilId)?.nome}</p>
-              <button onClick={iniciar} style={{ marginTop: 16, padding: "14px 32px", borderRadius: 50, fontSize: "1.1rem" }}>▶ Iniciar Roleplay</button>
+              <button onClick={() => iniciar(false)} style={{ marginTop: 16, padding: "14px 32px", borderRadius: 50, fontSize: "1.1rem" }}>▶ Iniciar Roleplay</button>
+              <button onClick={() => iniciar(true)} className="ghost" style={{ marginTop: 12 }}>📞 Iniciar ligação (simulada)</button>
               <Link href="/admin/properties" className="button ghost" style={{ marginTop: 12 }}>+ Adicionar apartamento</Link>
             </div>
           </div>
@@ -172,15 +219,7 @@ export default function AcademyPage() {
             <button onClick={() => { setBusca(""); setBairro(""); setMinPrice(""); setMaxPrice(""); carregarImoveis(); }} className="ghost">Limpar</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16, marginTop: 16 }}>
-            {imoveis.map(i => (
-              <button key={i.id} className="card" onClick={() => setSelecionado(i)} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%" }}>
-                {i.payload?.photos?.[0] ? <img src={i.payload.photos[0]} alt={i.title} style={{ width: "100%", height: 160, borderRadius: 12, objectFit: "cover" }} /> : <div style={{ height: 160, borderRadius: 12, background: "var(--panel)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>Sem foto</div>}
-                <h3 style={{ margin: "0 0 4px" }}>{i.title}</h3>
-                <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{i.neighborhood || i.address} • Ref: {i.reference}</p>
-                <p style={{ fontWeight: 700, color: "var(--accent)", margin: 0 }}>R$ {i.sale_price?.toLocaleString("pt-BR") || "—"}</p>
-                <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>{i.bedrooms ? `${i.bedrooms} quartos` : "—"} • {i.bathrooms ? `${i.bathrooms} banh` : "—"} • {i.parking_spaces ? `${i.parking_spaces} vagas` : "—"} • {i.area ? `${i.area}m²` : "—"}</p>
-              </button>
-            ))}
+            {imoveis.map(i => <PropertyCard key={i.id} i={i} onClick={() => setSelecionado(i)} />)}
           </div>
 
           {selecionado && (
@@ -204,7 +243,7 @@ export default function AcademyPage() {
                   <div><strong>Suítes</strong><p>{selecionado.suites}</p></div>
                   <div><strong>Banheiros</strong><p>{selecionado.bathrooms}</p></div>
                   <div><strong>Vagas</strong><p>{selecionado.parking_spaces}</p></div>
-                  <div><strong>Área</strong><p>{selecionado.area} m²</p></div>
+                  <div><strong>Área</strong><p>{selecionado.area ? `${selecionado.area} m²` : "—"}</p></div>
                 </div>
                 <p style={{ color: "var(--muted)", margin: "16px 0" }}>{selecionado.payload?.description}</p>
                 {selecionado.payload?.unit_features && <p style={{ color: "var(--muted)", margin: "8px 0" }}><strong>Unidade:</strong> {selecionado.payload.unit_features}</p>}
@@ -213,6 +252,67 @@ export default function AcademyPage() {
               </div>
             </div>
           )}
+        </main>
+      )}
+
+      {aba === "ligar" && (
+        <main style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: 12, borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between" }}>
+            <span>{modulos.find(m => m.id === moduloId)?.titulo} — {perfis.find(p => p.id === perfilId)?.nome}</span>
+            <span style={{ color: "var(--muted)" }}>{chamando ? "📞 Em chamada (integração ElevenLabs em breve)" : "Pronto para ligar"}</span>
+          </div>
+          <div style={{ flex: 1, padding: 24 }}>
+            {!sessaoAtiva ? (
+              <div className="card" style={{ textAlign: "center" }}>
+                <h2>Modo Ligação</h2>
+                <p style={{ color: "var(--muted)" }}>Selecione um módulo e um perfil na aba Home e clique abaixo para simular uma ligação.</p>
+                <button onClick={() => iniciar(true)} style={{ marginTop: 16 }}>📞 Iniciar ligação</button>
+              </div>
+            ) : (
+              <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+                <p style={{ fontSize: "1.5rem" }}>📞</p>
+                <p>Chamada em andamento... (ElevenLabs será integrado aqui)</p>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={encerrar} className="ghost" style={{ background: "var(--danger)", color: "white" }}>Encerrar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+      )}
+
+      {aba === "historico" && (
+        <main style={{ flex: 1, padding: 24, overflow: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2>Histórico de treinamentos</h2>
+            <button onClick={carregarHistorico}>Atualizar</button>
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {historico.map((h) => (
+              <div key={h.id} className="card" onClick={() => setCriterio(criterio === h.id ? null : h.id)} style={{ cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>{h.training_modules?.titulo || "—"}</h3>
+                    <p style={{ color: "var(--muted)", margin: "4px 0 0" }}>{h.training_profiles?.nome || "—"} • {new Date(h.created_at).toLocaleDateString("pt-BR")}</p>
+                  </div>
+                  <p style={{ color: "var(--accent)", fontSize: "1.5rem", fontWeight: 700 }}>{h.nota ?? "—"}</p>
+                </div>
+                {criterio === h.id && h.training_evaluations?.[0] && (
+                  <div style={{ marginTop: 16, padding: 12, background: "var(--panel)", borderRadius: 12 }}>
+                    <p><strong>Nota final:</strong> {h.training_evaluations[0].nota_final}</p>
+                    {["abertura", "qualificacao", "apresentacao", "objecoes", "fechamento", "linguagem", "empatia"].map((c) => (
+                      <div key={c} style={{ margin: "8px 0" }}>
+                        <strong>{c}</strong>: {h.training_evaluations[0][`${c}_nota`]} — {h.training_evaluations[0][`${c}_feedback`]}
+                      </div>
+                    ))}
+                    <p><strong>Pontos fortes:</strong> {h.training_evaluations[0].pontos_fortes?.join(", ")}</p>
+                    <p><strong>Pontos de melhoria:</strong> {h.training_evaluations[0].pontos_melhora?.join(", ")}</p>
+                    <p><strong>Ações sugeridas:</strong> {h.training_evaluations[0].acoes_sugeridas?.join(", ")}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </main>
       )}
 
