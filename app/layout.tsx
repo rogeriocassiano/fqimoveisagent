@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import "./globals.css";
+import FloatingAssistant from "./components/FloatingAssistant";
 
 function getToken() {
   if (typeof document === "undefined") return null;
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </header>
       )}
       {children}
+      {!isLogin && token && <FloatingAssistant />}
     </body>
   </html>;
 }
