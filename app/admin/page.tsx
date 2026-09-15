@@ -26,11 +26,8 @@ export default function AdminPage() {
   const [sourceAgentId, setSourceAgentId] = useState("");
   const [sourceForm, setSourceForm] = useState<{ type: SourceType; title: string; content: string; uri: string; file?: File }>({ type: "document", title: "", content: "", uri: "" });
   const [sourceLoading, setSourceLoading] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [audioFile, setAudioFile] = useState<File | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const promptAudioRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1];
@@ -87,23 +84,6 @@ export default function AdminPage() {
       setForm((prev) => ({ ...prev, ...data.suggestion }));
     } else {
       alert(data.error || "Erro ao gerar sugestão");
-    }
-  }
-
-  async function transcribePrompt() {
-    if (!audioFile) return;
-    setTranscribing(true);
-    const body = new FormData();
-    body.append("file", audioFile);
-    const res = await fetch("/api/extract", { method: "POST", body });
-    const data = await res.json();
-    setTranscribing(false);
-    if (data.text) {
-      setForm((prev) => ({ ...prev, system_prompt: prev.system_prompt ? `${prev.system_prompt}\n\n${data.text}` : data.text }));
-      setAudioFile(null);
-      if (promptAudioRef.current) promptAudioRef.current.value = "";
-    } else {
-      alert(data.error || "Erro ao transcrever áudio");
     }
   }
 
@@ -191,11 +171,7 @@ export default function AdminPage() {
               style={{ width: "100%", fontFamily: "monospace", fontSize: ".9rem" }}
             />
             <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 8, alignItems: "center" }}>
-              <input ref={promptAudioRef} type="file" accept="audio/*" onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
-              {audioFile && <span style={{ fontSize: ".75rem", color: "var(--muted)" }}>{audioFile.name}</span>}
               <MicButton onText={(t) => setForm((prev) => ({ ...prev, system_prompt: prev.system_prompt ? `${prev.system_prompt}\n\n${t}` : t }))} title="Ditar prompt" />
-              <button type="button" onClick={() => promptAudioRef.current?.click()} className="ghost" style={{ fontSize: ".8rem" }}>🎤 Áudio</button>
-              {audioFile && <button type="button" onClick={transcribePrompt} disabled={transcribing} className="ghost" style={{ fontSize: ".8rem" }}>{transcribing ? "Transcrevendo..." : "✨ Usar áudio"}</button>}
               <button type="button" onClick={improve} disabled={improving} className="ghost" style={{ fontSize: ".8rem" }}>{improving ? "Melhorando..." : "✨ Melhorar prompt"}</button>
             </div>
           </div>
