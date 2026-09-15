@@ -1,6 +1,6 @@
 create or replace function match_chunks(
   query_embedding vector(768),
-  filter_agent_id uuid,
+  filter_agent_id uuid default null,
   match_threshold float default 0.5,
   match_count int default 10
 )
@@ -24,7 +24,7 @@ begin
   from chunks c
   join documents d on d.id = c.document_id
   join sources s on s.id = d.source_id
-  where s.agent_id = filter_agent_id
+  where (filter_agent_id is null or s.agent_id = filter_agent_id)
     and 1 - (c.embedding <=> query_embedding) > match_threshold
   order by c.embedding <=> query_embedding
   limit match_count;

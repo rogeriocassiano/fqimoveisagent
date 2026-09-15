@@ -20,7 +20,7 @@ function PropertyCard({ p, onClick }: { p: Property; onClick: () => void }) {
   const prev = () => setIdx((idx - 1 + photos.length) % photos.length);
   const next = () => setIdx((idx + 1) % photos.length);
   return (
-    <button className="card" onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%", position: "relative" }}>
+    <div className="card" role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: "1px solid var(--line)", width: "100%", position: "relative" }}>
       <div style={{ position: "relative" }}>
         <Photo src={photos[idx]} alt={p.title} style={{ width: "100%", height: 160, borderRadius: 12 }} />
         {hasMany && (
@@ -35,7 +35,7 @@ function PropertyCard({ p, onClick }: { p: Property; onClick: () => void }) {
       <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{p.neighborhood} • {p.bedrooms ? `${p.bedrooms} quartos` : "—"}</p>
       <p style={{ color: "var(--accent)", fontWeight: 700, margin: 0 }}>R$ {p.sale_price?.toLocaleString("pt-BR") || "—"}</p>
       <p style={{ color: "var(--muted)", fontSize: ".75rem" }}>Ref: {p.reference}</p>
-    </button>
+    </div>
   );
 }
 
@@ -101,7 +101,7 @@ export default function PropertiesPage() {
 
       <section>
         <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Imóveis cadastrados</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 16 }}>
           {properties.map((p) => <PropertyCard key={p.id} p={p} onClick={() => setSelected(p)} />)}
         </div>
       </section>

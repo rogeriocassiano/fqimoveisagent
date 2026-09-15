@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import MicButton from "../../components/MicButton";
 
 type Modulo = { id: number; ordem: number; ativo: boolean; titulo: string; descricao: string; objetivo: string; emoji: string; dificuldade: string; prompt_instrucoes: string };
 type Perfil = { id: number; ordem: number; ativo: boolean; nome: string; negocio: string; emoji: string; dor: string; estilo: string; prompt_instrucoes: string };
@@ -164,9 +165,15 @@ export default function AcademyAdminPage() {
               {("titulo" in editando) ? (
                 <>
                   <input value={editando.titulo} onChange={(e) => setEditando({ ...editando, titulo: e.target.value })} placeholder="Título" required />
-                  <textarea value={editando.descricao} onChange={(e) => setEditando({ ...editando, descricao: e.target.value })} placeholder="Descrição" rows={3} />
-                  <input value={editando.objetivo} onChange={(e) => setEditando({ ...editando, objetivo: e.target.value })} placeholder="Objetivo" />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <textarea value={editando.descricao} onChange={(e) => setEditando({ ...editando, descricao: e.target.value })} placeholder="Descrição (pode ditar pelo microfone)" rows={3} style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando({ ...editando, descricao: editando.descricao ? `${editando.descricao} ${t}` : t })} title="Ditar descrição" />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input value={editando.objetivo} onChange={(e) => setEditando({ ...editando, objetivo: e.target.value })} placeholder="Objetivo" style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando({ ...editando, objetivo: t })} title="Ditar objetivo" />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 12 }}>
                     <input value={editando.emoji} onChange={(e) => setEditando({ ...editando, emoji: e.target.value })} placeholder="Emoji" />
                     <select value={editando.dificuldade} onChange={(e) => setEditando({ ...editando, dificuldade: e.target.value })}>
                       <option>Iniciante</option>
@@ -178,22 +185,34 @@ export default function AcademyAdminPage() {
                   <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)" }}>
                     <input type="checkbox" checked={editando.ativo} onChange={(e) => setEditando({ ...editando, ativo: e.target.checked })} /> Ativo
                   </label>
-                  <textarea value={editando.prompt_instrucoes} onChange={(e) => setEditando({ ...editando, prompt_instrucoes: e.target.value })} placeholder="Instruções de prompt para a IA" rows={4} />
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <textarea value={editando.prompt_instrucoes} onChange={(e) => setEditando({ ...editando, prompt_instrucoes: e.target.value })} placeholder="Instruções de prompt para a IA (pode ditar pelo microfone)" rows={4} style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando((prev) => prev ? { ...prev, prompt_instrucoes: prev.prompt_instrucoes ? `${prev.prompt_instrucoes}\n\n${t}` : t } : prev)} title="Ditar instruções" />
+                  </div>
                 </>
               ) : (
                 <>
                   <input value={editando.nome} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} placeholder="Nome" required />
                   <input value={editando.negocio} onChange={(e) => setEditando({ ...editando, negocio: e.target.value })} placeholder="Negócio/perfil" />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
                     <input value={editando.emoji} onChange={(e) => setEditando({ ...editando, emoji: e.target.value })} placeholder="Emoji" />
                     <input type="number" value={editando.ordem} onChange={(e) => setEditando({ ...editando, ordem: Number(e.target.value) })} placeholder="Ordem" />
                   </div>
-                  <input value={editando.dor} onChange={(e) => setEditando({ ...editando, dor: e.target.value })} placeholder="Dor" />
-                  <input value={editando.estilo} onChange={(e) => setEditando({ ...editando, estilo: e.target.value })} placeholder="Estilo de comunicação" />
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input value={editando.dor} onChange={(e) => setEditando({ ...editando, dor: e.target.value })} placeholder="Dor" style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando({ ...editando, dor: t })} title="Ditar dor" />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input value={editando.estilo} onChange={(e) => setEditando({ ...editando, estilo: e.target.value })} placeholder="Estilo de comunicação" style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando({ ...editando, estilo: t })} title="Ditar estilo" />
+                  </div>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)" }}>
                     <input type="checkbox" checked={editando.ativo} onChange={(e) => setEditando({ ...editando, ativo: e.target.checked })} /> Ativo
                   </label>
-                  <textarea value={editando.prompt_instrucoes} onChange={(e) => setEditando({ ...editando, prompt_instrucoes: e.target.value })} placeholder="Instruções de prompt para a IA" rows={4} />
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <textarea value={editando.prompt_instrucoes} onChange={(e) => setEditando({ ...editando, prompt_instrucoes: e.target.value })} placeholder="Instruções de prompt para a IA (pode ditar pelo microfone)" rows={4} style={{ flex: 1 }} />
+                    <MicButton onText={(t) => setEditando((prev) => prev ? { ...prev, prompt_instrucoes: prev.prompt_instrucoes ? `${prev.prompt_instrucoes}\n\n${t}` : t } : prev)} title="Ditar instruções" />
+                  </div>
                 </>
               )}
               <button type="submit">Salvar</button>

@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SpeechRecognitionLike } from "@/lib/speech";
+import MicButton from "../components/MicButton";
 
 type Agent = { id: string; name: string; persona: string };
 
@@ -25,15 +25,13 @@ export default function ChatPage() {
   const router = useRouter();
   const [tab, setTab] = useState<"chat" | "context">("chat");
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [agentId, setAgentId] = useState("");
+  const [agentId, setAgentId] = useState("all");
   const [sources, setSources] = useState<Source[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState<SpeechRecognitionLike | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
 
@@ -45,12 +43,11 @@ export default function ChatPage() {
   useEffect(() => {
     fetch("/api/agents").then((r) => r.json()).then((data) => {
       setAgents(data.agents ?? []);
-      if (data.agents?.[0]) setAgentId(data.agents[0].id);
     });
   }, []);
 
   useEffect(() => {
-    if (!agentId) return;
+    if (!agentId || agentId === "all") return;
     fetch(`/api/agents/${agentId}`).then((r) => r.json()).then((data) => {
       setSources(data.agent?.sources ?? []);
     });
@@ -68,32 +65,6 @@ export default function ChatPage() {
     } else {
       setPreview(null);
     }
-  }
-
-  function startVoice() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      alert("Seu navegador não suporta reconhecimento de voz. Use Chrome ou anexe um áudio.");
-      return;
-    }
-    const recognition = new SR();
-    recognition.lang = "pt-BR";
-    recognition.interimResults = false;
-    recognition.onstart = () => setRecording(true);
-    recognition.onend = () => setRecording(false);
-    recognition.onresult = (event: unknown) => {
-      const ev = event as { results: { transcript: string }[][] };
-      const transcript = Array.from(ev.results).map((r) => r[0].transcript).join("");
-      setInput((prev) => (prev ? prev + " " : prev) + transcript);
-    };
-    recognition.start();
-    setMediaRecorder(recognition);
-  }
-
-  function stopVoice() {
-    mediaRecorder?.stop();
-    setRecording(false);
-    setMediaRecorder(null);
   }
 
   async function send(e?: React.FormEvent) {
@@ -145,7 +116,8 @@ export default function ChatPage() {
         <Link href="/admin" className="button" style={{ marginBottom: 16, textAlign: "center" }}>+ Novo agente</Link>
 
         <label style={{ fontSize: ".85rem", color: "var(--muted)", marginBottom: 6 }}>Agente</label>
-        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ marginBottom: 20 }}>
+        <select value={agentId} onChange={(e) => { setAgentId(e.target.value); if (e.target.value === "all") setSources([]); }} style={{ marginBottom: 20 }}>
+          <option value="all">🧠 Geral (todos os agentes)</option>
           {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
 
@@ -224,7 +196,7 @@ export default function ChatPage() {
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 20, padding: "8px 12px" }}>
             <button type="button" className="icon ghost" onClick={() => fileRef.current?.click()} title="Anexar foto, vídeo, PDF...">📎</button>
             <input ref={fileRef} type="file" accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.xlsx,.xls,.csv" onChange={onFileChange} style={{ display: "none" }} />
-            <button type="button" className="icon ghost" onClick={recording ? stopVoice : startVoice} title="Gravar áudio">{recording ? "⏹" : "🎤"}</button>
+            <MicButton onText={(t) => setInput((prev) => (prev ? prev + " " : "") + t)} title="Falar mensagem" />
             {file && <button type="button" className="icon ghost" onClick={trainFromChat} title="Salvar como fonte de treinamento">📚</button>}
             <textarea
               value={input}

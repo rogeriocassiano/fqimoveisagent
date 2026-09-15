@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import "@/lib/speech";
 import type { SpeechRecognitionLike } from "@/lib/speech";
+import MicButton from "./MicButton";
 
 const sugestoes = [
   { icon: "🧨", label: "Corrigir uma mensagem para cliente" },
@@ -26,7 +27,7 @@ export default function FloatingAssistant() {
   const recRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
-    fetch("/api/agents").then(r => r.json()).then(d => setAgentId(d.agents?.[0]?.id ?? null));
+    fetch("/api/agents").then(r => r.json()).then(d => setAgentId(d.agents?.[0]?.id ?? null)).catch(() => setAgentId(null));
   }, []);
 
   async function enviar(texto: string) {
@@ -110,6 +111,7 @@ export default function FloatingAssistant() {
               </div>
               <form onSubmit={(e) => { e.preventDefault(); enviar(input); }} style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--line)" }}>
                 <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Pergunte ou cole uma mensagem..." style={{ flex: 1 }} />
+                <MicButton onText={(t) => setInput((prev) => (prev ? prev + " " : "") + t)} title="Falar" />
                 <button type="submit" disabled={loading || !input.trim()}>➤</button>
               </form>
             </div>

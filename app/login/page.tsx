@@ -13,7 +13,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1];
-    if (token) router.push("/admin");
+    const role = document.cookie.match(/sb-role=([^;]+)/)?.[1];
+    if (token) router.push(role === "trainee" ? "/academy" : "/admin");
   }, [router]);
 
   async function login(e: React.FormEvent) {
@@ -30,7 +31,8 @@ export default function LoginPage() {
     if (res.ok && data.access_token) {
       document.cookie = `sb-access-token=${data.access_token}; path=/; max-age=${60 * 60 * 24 * 7}`;
       document.cookie = `sb-refresh-token=${data.refresh_token}; path=/; max-age=${60 * 60 * 24 * 7}`;
-      router.push("/admin");
+      document.cookie = `sb-role=${data.role}; path=/; max-age=${60 * 60 * 24 * 7}`;
+      router.push(data.role === "trainee" ? "/academy" : "/admin");
     } else {
       setError(data.error || "Erro ao fazer login");
     }

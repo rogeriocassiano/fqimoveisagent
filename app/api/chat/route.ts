@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { chatWithAgent } from "@/lib/agent";
+import { chatWithAgent, chatWithAllAgents } from "@/lib/agent";
 import { answerWithGemini } from "@/lib/gemini";
 import { extractTextFromFile } from "@/lib/extract";
 import { uploadFile } from "@/lib/storage";
 
-const textSchema = z.object({ message: z.string().trim().min(1).max(4000), agentId: z.string().uuid().optional() });
+const textSchema = z.object({ message: z.string().trim().min(1).max(4000), agentId: z.string().optional() });
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") || "";
@@ -53,6 +53,11 @@ export async function POST(request: Request) {
     }
 
     const prompt = [message, extractedText && `Conteúdo do arquivo ${file?.name}:\n${extractedText}`].filter(Boolean).join("\n\n") || "Descreva o conteúdo enviado.";
+
+    if (agentId === "all") {
+      const result = await chatWithAllAgents(prompt, parts);
+      return Response.json({ ...result, fileUrl });
+    }
 
     if (agentId) {
       const result = await chatWithAgent(agentId, prompt, parts);

@@ -183,6 +183,42 @@ export async function trainSource(sourceId: string) {
   return { chunks: chunks.length };
 }
 
+async function buildChatContext(message: string, agentId?: string) {
+  const db = adminDb();
+  const embedding = await embedText(message);
+  const rpcArgs: Record<string, unknown> = { query_embedding: embedding, match_threshold: 0.3, match_count: 10 };
+  if (agentId) rpcArgs.filter_agent_id = agentId;
+  const { data: matches, error: matchError } = await db.rpc("match_chunks", rpcArgs);
+  if (matchError) throw matchError;
+
+  const allMatches = (matches as { id: string; document_id: string; text: string; metadata: Record<string, unknown>; similarity: number }[] | null) ?? [];
+
+  const webContext = await extractUrlsFromMessage(message);
+  const ragContext = allMatches.map((m) => m.text).join("\n---\n");
+
+  let imoveisContext = "";
+  const propertyKeywords = /apartamento|im[óo]vel|imoveis|pre[çc]o|bairro|quarto|vaga|metragem|catal[óo]go|imovel/i;
+  const refMatch = message.match(/\bref(?:erencia)?[\s\.:]*#?(\d+)\b/i) ?? message.match(/\b\d{1,5}(?![\d\w])/g)?.map(m => m.trim()).filter(m => Number(m) > 0 && Number(m) < 1000).sort((a, b) => Number(b) - Number(a))[0];
+  const isPropertyMessage = propertyKeywords.test(message) || refMatch;
+  if (isPropertyMessage) {
+    try {
+      let imoveis: Awaited<ReturnType<typeof searchProperties>> = [];
+      if (typeof refMatch === "string" && !Array.isArray(refMatch)) {
+        const found = await searchProperties({ reference: refMatch }, 5);
+        imoveis = found && found.length ? found : await searchProperties({}, 20);
+      } else {
+        imoveis = await searchProperties({}, 20);
+      }
+      imoveisContext = `Catálogo de imóveis disponíveis:\n${imoveis.map((p: { reference?: string; title?: string; neighborhood?: string; sale_price?: number; bedrooms?: number; bathrooms?: number; parking_spaces?: number; area?: number; url?: string; payload?: { description?: string } }) => `- Ref ${p.reference}: ${p.title}, ${p.neighborhood}, R$ ${p.sale_price?.toLocaleString("pt-BR")}, ${p.bedrooms} quartos, ${p.bathrooms} banh, ${p.parking_spaces} vagas, ${p.area}m². Link: ${p.url}. Descrição: ${p.payload?.description ?? ""}`).join("\n")}`;
+    } catch (e) {
+      console.warn("property_lookup_failed", e instanceof Error ? e.message : "unknown");
+    }
+  }
+
+  const context = [ragContext && `Contexto treinado:\n${ragContext}`, webContext && `Conteúdo de sites:\n${webContext}`, imoveisContext].filter(Boolean).join("\n\n");
+  return { context, matches: allMatches };
+}
+
 export async function chatWithAgent(agentId: string, message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user") {
   const db = adminDb();
   const { data: agent, error } = await db.from("agents").select("*, agent_versions(system_prompt)").eq("id", agentId).single();
@@ -192,48 +228,9 @@ export async function chatWithAgent(agentId: string, message: string, parts?: { 
   const tone = (agent as { tone?: string }).tone ?? "cordial";
   const persona = (agent as { persona?: string }).persona ?? "";
 
-  const embedding = await embedText(message);
-  const { data: matches, error: matchError } = await db.rpc("match_chunks", {
-    query_embedding: embedding,
-    filter_agent_id: agentId,
-    match_threshold: 0.3,
-    match_count: 5,
-  });
-  if (matchError) throw matchError;
+  const { context, matches } = await buildChatContext(message, agentId);
 
-  const webContext = await extractUrlsFromMessage(message);
-  const ragContext = (matches as { text: string }[] | null)?.map((m) => m.text).join("\n---\n") ?? "";
-
-  let imoveisContext = "";
-  const propertyKeywords = /apartamento|im[óo]vel|imoveis|pre[çc]o|bairro|quarto|vaga|metragem|catal[óo]go|imovel/i;
-  if (propertyKeywords.test(message)) {
-    try {
-      const imoveis = await searchProperties({}, 20);
-      imoveisContext = `Catálogo de imóveis disponíveis (até 20):\n${imoveis.map((p: { reference?: string; title?: string; neighborhood?: string; sale_price?: number; bedrooms?: number; bathrooms?: number; parking_spaces?: number; area?: number; url?: string; payload?: { description?: string } }) => `- Ref ${p.reference}: ${p.title}, ${p.neighborhood}, R$ ${p.sale_price?.toLocaleString("pt-BR")}, ${p.bedrooms} quartos, ${p.bathrooms} banh, ${p.parking_spaces} vagas, ${p.area}m². Link: ${p.url}. Descrição: ${p.payload?.description ?? ""}`).join("\n")}`;
-    } catch (e) {
-      console.warn("property_lookup_failed", e instanceof Error ? e.message : "unknown");
-    }
-  }
-
-  const context = [ragContext && `Contexto treinado:\n${ragContext}`, webContext && `Conteúdo de sites:\n${webContext}`, imoveisContext].filter(Boolean).join("\n\n");
-
-  const prompt = `Você é o SR. Queiroz, um assistente de IA jovem, curioso e em constante aprendizado com o diretor de vendas da FQ Imóveis.
-
-Sua voz é HUMANA: curta, espontânea, leve e natural, como um corretor conversando no WhatsApp. Evite textões, introduções forçadas ou parecer um robô. Responda de forma direta, com no máximo 2-3 frases curtas. Se possível, quebre a linha. Use emojis com moderação.
-
-Quando alguém disser "oi", "olá" ou "tudo bem", responda de forma descontraída, como: "Eae, tudo bem?" ou "Salve! Tudo certo por aqui." Não mande textos completos de apresentação nesses casos. Apresente o SR. Queiroz só quando perguntarem quem você é.
-
-Você foi desenvolvido pelo engenheiro de software Rogério Cassiano para a FQ Imóveis. Seu treinamento é feito pelo diretor de vendas e pela gestão da FQ Imóveis.
-
-Seu tom geral é: ${tone || "despojado e profissional"}. Sua persona na empresa é: ${persona || "aprendiz do diretor de vendas"}.
-
-Sempre que possível, use o contexto abaixo. Se a resposta não estiver no contexto, seja honesto, diga que ainda está aprendendo e ofereça encaminhar para um corretor humano.
-
-Contexto:
-${context || "Nenhum contexto fornecido."}
-
-Pergunta do usuário: ${message}`;
-
+  const prompt = buildFinalPrompt(message, tone, persona, context);
   const answer = await answerWithGemini(message, prompt, systemPrompt, parts);
 
   const { data: conversation } = await db
@@ -248,5 +245,52 @@ Pergunta do usuário: ${message}`;
     ]);
   }
 
-  return { answer, sources: (matches as { text: string; metadata: Record<string, unknown> }[] | null) ?? [] };
+  return { answer, sources: matches };
+}
+
+export async function chatWithAllAgents(message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user") {
+  const db = adminDb();
+  const { data: agents } = await db.from("agents").select("*, agent_versions(system_prompt)").order("created_at", { ascending: false });
+  const systemPrompts = (agents ?? []).map((a) => (a as { agent_versions?: { system_prompt?: string }[] }).agent_versions?.[0]?.system_prompt ?? "").filter(Boolean).join("\n---\n");
+  const tone = "despojado e profissional";
+  const persona = "corretor geral da FQ Imóveis, acessa todo o conhecimento treinado de todos os agentes";
+
+  const { context, matches } = await buildChatContext(message);
+
+  const prompt = buildFinalPrompt(message, tone, persona, context);
+  const combinedSystemPrompt = `Você é o SR. Queiroz, um assistente geral da FQ Imóveis que combina o conhecimento de todos os agentes treinados.\n\n${systemPrompts}`;
+  const answer = await answerWithGemini(message, prompt, combinedSystemPrompt, parts);
+
+  const { data: conversation } = await db
+    .from("conversations")
+    .insert({ agent_id: null, channel: "web", contact_id: contactId })
+    .select("id")
+    .single();
+  if (conversation) {
+    await db.from("messages").insert([
+      { conversation_id: conversation.id, role: "user", text: message },
+      { conversation_id: conversation.id, role: "assistant", text: answer },
+    ]);
+  }
+
+  return { answer, sources: matches };
+}
+
+function buildFinalPrompt(message: string, tone: string, persona: string, context: string) {
+  return `Você é o SR. Queiroz, um assistente de IA jovem, curioso e em constante aprendizado com o diretor de vendas da FQ Imóveis.
+
+Sua voz é HUMANA: curta, espontânea, leve e natural, como um corretor conversando no WhatsApp. Evite textões, introduções forçadas ou parecer um robô. Responda de forma direta, com no máximo 2-3 frases curtas. Se possível, quebre a linha. Use emojis com moderação.
+
+Quando alguém disser "oi", "olá" ou "tudo bem", responda de forma descontraída, como: "Eae, tudo bem?" ou "Salve! Tudo certo por aqui." Não mande textos completos de apresentação nesses casos. Apresente o SR. Queiroz só quando perguntarem quem você é.
+
+Você foi desenvolvido pelo engenheiro de software Rogério Cassiano para a FQ Imóveis. Seu treinamento é feito pelo diretor de vendas e pela gestão da FQ Imóveis.
+
+Seu tom geral é: ${tone || "despojado e profissional"}. Sua persona na empresa é: ${persona || "aprendiz do diretor de vendas"}.
+
+Sempre que possível, use o contexto abaixo. Se a pergunta for sobre um imóvel específico (ref, nome do empreendimento, bairro, preço), use PREFERENCIALMENTE os dados do catálogo de imóveis. Forneça o link, preço e detalhes quando disponíveis. Se a resposta não estiver no contexto, seja honesto, diga que ainda está aprendendo e ofereça encaminhar para um corretor humano.
+
+Contexto:
+${context || "Nenhum contexto fornecido."}
+
+Pergunta do usuário: ${message}`;
 }

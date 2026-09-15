@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
+import MicButton from "../components/MicButton";
 
 type Modulo = { id: number; titulo: string; descricao: string; objetivo: string; emoji: string; dificuldade: string };
 type Perfil = { id: number; nome: string; negocio: string; emoji: string; dor: string; estilo: string };
 type Imovel = { id: string; reference: string; title: string; sale_price: number; address?: string; neighborhood?: string; bedrooms?: number; suites?: number; bathrooms?: number; parking_spaces?: number; area?: number; url?: string; payload?: { photos?: string[]; description?: string; unit_features?: string; building_features?: string } };
 type Msg = { role: "user" | "assistant"; content: string };
+type Avaliacao = { nota_final: number; pontos_fortes?: string[]; pontos_melhora?: string[]; acoes_sugeridas?: string[] } & Record<string, string | number | string[] | undefined>;
 
 function PropertyCard({ i, onClick }: { i: Imovel; onClick: () => void }) {
   const [idx, setIdx] = useState(0);
@@ -16,7 +18,7 @@ function PropertyCard({ i, onClick }: { i: Imovel; onClick: () => void }) {
   const prev = () => setIdx((idx - 1 + photos.length) % photos.length);
   const next = () => setIdx((idx + 1) % photos.length);
   return (
-    <button className="card" onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: 0, width: "100%", position: "relative" }}>
+    <div className="card" role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 8, cursor: "pointer", border: "1px solid var(--line)", width: "100%", position: "relative" }}>
       <div style={{ position: "relative" }}>
         {photos[idx] ? <img src={photos[idx]} alt={i.title} style={{ width: "100%", height: 160, borderRadius: 12, objectFit: "cover" }} /> : <div style={{ height: 160, borderRadius: 12, background: "var(--panel)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>Sem foto</div>}
         {hasMany && (
@@ -31,13 +33,21 @@ function PropertyCard({ i, onClick }: { i: Imovel; onClick: () => void }) {
       <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{i.neighborhood || i.address} • Ref: {i.reference}</p>
       <p style={{ fontWeight: 700, color: "var(--accent)", margin: 0 }}>R$ {i.sale_price?.toLocaleString("pt-BR") || "—"}</p>
       <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>{i.bedrooms ? `${i.bedrooms} quartos` : "—"} • {i.bathrooms ? `${i.bathrooms} banh` : "—"} • {i.parking_spaces ? `${i.parking_spaces} vagas` : "—"} • {i.area ? `${i.area}m²` : "—"}</p>
-    </button>
+    </div>
   );
 }
 
 type Aba = "home" | "roleplay" | "produtos" | "ligar" | "historico";
 
 export default function AcademyPage() {
+  return (
+    <ConversationProvider>
+      <AcademyInner />
+    </ConversationProvider>
+  );
+}
+
+function AcademyInner() {
   const router = useRouter();
   const [aba, setAba] = useState<Aba>("home");
   const [modulos, setModulos] = useState<Modulo[]>([]);
@@ -54,7 +64,8 @@ export default function AcademyPage() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState<{ nota: number; feedback_geral: string; pontos_fortes: string[]; pontos_melhora: string[] } | null>(null);
+  const [feedback, setFeedback] = useState<Avaliacao | null>(null);
+  const [erro, setErro] = useState("");
   const [sessaoAtiva, setSessaoAtiva] = useState(false);
   const [inicio, setInicio] = useState<number>(0);
   const [duracao, setDuracao] = useState(0);
@@ -63,52 +74,97 @@ export default function AcademyPage() {
   const [historico, setHistorico] = useState<any[]>([]);
   const [chamando, setChamando] = useState(false);
   const [criterio, setCriterio] = useState<number | null>(null);
+  const [callErro, setCallErro] = useState("");
+  const convoId = useRef<string | null>(null);
+  const elAgentId = useRef<string | null>(null);
+  const sessaoIdRef = useRef<number | null>(null);
   const bottom = useRef<HTMLDivElement | null>(null);
   const timer = useRef<NodeJS.Timeout | null>(null);
 
+  const conversation = useConversation({
+    onError: (e) => {
+      setCallErro(typeof e === "string" ? e : "Erro na conexão de voz. Verifique a permissão do microfone.");
+      setChamando(false);
+      // Se a chamada nunca conectou, remove o agente temporário criado no ElevenLabs
+      if (!convoId.current && elAgentId.current && sessaoIdRef.current) {
+        fetch("/api/roleplay/call/finish", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoIdRef.current, elAgentId: elAgentId.current }) }).catch(() => {});
+        elAgentId.current = null;
+        setSessaoAtiva(false);
+      }
+    },
+    onMessage: ({ message, source }) => {
+      if (message?.trim()) setMsgs((m) => [...m, { role: source === "user" ? "user" : "assistant", content: message.trim() }]);
+    },
+    onConversationMetadata: (meta) => { convoId.current = meta?.conversation_id ?? convoId.current; },
+    onDisconnect: () => setChamando(false),
+  });
+
   useEffect(() => { const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1]; if (!token) router.push("/login"); }, [router]);
 
-  const carregarImoveis = () => {
+  const carregarImoveis = useCallback(() => {
     const params = new URLSearchParams();
     if (busca) params.set("q", busca);
     if (minPrice) params.set("minPrice", minPrice);
     if (maxPrice) params.set("maxPrice", maxPrice);
     if (bairro) params.set("neighborhood", bairro);
-    fetch(`/api/academy/properties?${params}`).then(r => r.json()).then(d => setImoveis(d.properties ?? []));
-  };
+    fetch(`/api/academy/properties?${params}`, { credentials: "include" }).then(r => r.json()).then(d => setImoveis(d.properties ?? [])).catch(() => setImoveis([]));
+  }, [busca, minPrice, maxPrice, bairro]);
+
+  const carregarHistorico = useCallback(() => fetch("/api/roleplay/history", { credentials: "include" }).then(r => r.json()).then(d => setHistorico(d.sessions ?? [])).catch(() => setHistorico([])), []);
 
   useEffect(() => {
-    fetch("/api/academy/modules").then(r => r.json()).then(d => { setModulos(d.modules ?? []); setModuloId(d.modules?.[0]?.id ?? null); });
-    fetch("/api/academy/profiles").then(r => r.json()).then(d => { setPerfis(d.profiles ?? []); setPerfilId(d.profiles?.[0]?.id ?? null); });
+    fetch("/api/academy/modules", { credentials: "include" }).then(r => r.json()).then(d => { setModulos(d.modules ?? []); setModuloId(d.modules?.[0]?.id ?? null); }).catch(() => setModulos([]));
+    fetch("/api/academy/profiles", { credentials: "include" }).then(r => r.json()).then(d => { setPerfis(d.profiles ?? []); setPerfilId(d.profiles?.[0]?.id ?? null); }).catch(() => setPerfis([]));
     carregarImoveis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => { if (aba === "historico") carregarHistorico(); }, [aba, carregarHistorico]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
   useEffect(() => { if (sessaoAtiva) { timer.current = setInterval(() => setDuracao(Math.floor((Date.now() - inicio) / 1000)), 1000); } else if (timer.current) { clearInterval(timer.current); } return () => { if (timer.current) clearInterval(timer.current); }; }, [sessaoAtiva, inicio]);
 
   const iniciar = async (modoLigacao = false) => {
-    if (!moduloId || !perfilId) return;
-    setMsgs([]); setFeedback(null); setSessaoAtiva(true); setInicio(Date.now()); setDuracao(0); setAba(modoLigacao ? "ligar" : "roleplay"); setChamando(modoLigacao); setLoading(true);
-    const res = await fetch("/api/roleplay/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduloId, perfilId }) });
-    const data = await res.json();
-    setSessaoId(data.sessionId);
-    setMsgs([{ role: "assistant", content: data.message }]);
+    if (!moduloId || !perfilId) { setErro("Selecione um módulo e um perfil para começar."); return; }
+    setErro("");
+    setMsgs([]); setFeedback(null); setSessaoAtiva(true); setInicio(Date.now()); setDuracao(0); setAba(modoLigacao ? "ligar" : "roleplay"); setChamando(modoLigacao); setCallErro(""); setLoading(true);
+    try {
+      const res = await fetch(modoLigacao ? "/api/roleplay/call/start" : "/api/roleplay/start", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduloId, perfilId }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setSessaoAtiva(false); setChamando(false); setAba("home"); setLoading(false); setErro(data.error || "Erro ao iniciar roleplay"); return; }
+      setSessaoId(data.sessionId);
+      sessaoIdRef.current = data.sessionId;
+      setMsgs([{ role: "assistant", content: data.message }]);
+      if (modoLigacao) {
+        convoId.current = null;
+        elAgentId.current = data.elAgentId ?? null;
+        conversation.startSession({ signedUrl: data.signedUrl, connectionType: "websocket", dynamicVariables: data.dynamicVariables });
+      }
+    } catch {
+      setSessaoAtiva(false); setChamando(false); setAba("home"); setErro("Erro de conexão ao iniciar roleplay");
+    }
     setLoading(false);
   };
 
   const encerrar = async () => {
     if (!sessaoId) return;
     setLoading(true);
-    await fetch("/api/roleplay/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: "ENCERRAR TREINO" }) });
-    const evalRes = await fetch("/api/roleplay/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId }) });
-    const evalData = await evalRes.json();
-    setFeedback(evalData.avaliacao);
+    if (convoId.current || elAgentId.current) {
+      const cid = convoId.current ?? conversation.getId();
+      try { conversation.endSession(); } catch { /* já desconectado */ }
+      await fetch("/api/roleplay/call/finish", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, conversationId: cid, elAgentId: elAgentId.current }) }).catch(() => {});
+      convoId.current = null; elAgentId.current = null;
+    } else {
+      await fetch("/api/roleplay/chat", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: "ENCERRAR TREINO" }) });
+    }
+    const evalRes = await fetch("/api/roleplay/evaluate", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, duracao }) });
+    const evalData = await evalRes.json().catch(() => ({}));
+    if (evalData.avaliacao) setFeedback(evalData.avaliacao);
+    else setErro(evalData.error || "Não foi possível gerar a avaliação");
     setSessaoAtiva(false); setChamando(false); setAba("historico");
     setLoading(false);
-    fetch("/api/roleplay/history").then(r => r.json()).then(d => setHistorico(d.sessions ?? []));
+    carregarHistorico();
   };
-
-  const carregarHistorico = () => fetch("/api/roleplay/history").then(r => r.json()).then(d => setHistorico(d.sessions ?? []));
 
   const enviar = async () => {
     if (!input.trim() || loading || !sessaoId) return;
@@ -119,15 +175,16 @@ export default function AcademyPage() {
       await encerrar();
       return;
     }
-    const res = await fetch("/api/roleplay/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: texto }) });
-    const data = await res.json();
+    const res = await fetch("/api/roleplay/chat", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessaoId, message: texto }) });
+    const data = await res.json().catch(() => ({}));
     if (data.message) setMsgs(prev => [...prev, { role: "assistant", content: data.message }]);
+    else if (data.error) setMsgs(prev => [...prev, { role: "assistant", content: `⚠ ${data.error}` }]);
     setLoading(false);
   };
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
-  const difColor = (d: string) => d === "Iniciante" ? "bg-green-100 text-green-700" : d === "Médio" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700";
+  const difColor = (d: string): React.CSSProperties => d === "Iniciante" ? { background: "#dcfce7", color: "#15803d" } : d === "Médio" ? { background: "#fef9c3", color: "#a16207" } : { background: "#fee2e2", color: "#b91c1c" };
   const notaColor = (n: number) => n >= 9 ? { color: "#16a34a", bg: "#dcfce7" } : n >= 7 ? { color: "#ca8a04", bg: "#fef9c3" } : { color: "#dc2626", bg: "#fee2e2" };
 
   return (
@@ -148,7 +205,7 @@ export default function AcademyPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
             {modulos.map(m => (
               <button key={m.id} onClick={() => setModuloId(m.id)} className="card" style={{ textAlign: "left", borderWidth: 2, borderColor: moduloId === m.id ? "var(--accent)" : "var(--line)", background: moduloId === m.id ? "var(--user-bg)" : "var(--surface)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: "1.5rem" }}>{m.emoji}</span><span className={difColor(m.dificuldade)} style={{ padding: "2px 8px", borderRadius: 99, fontSize: ".7rem" }}>{m.dificuldade}</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: "1.5rem" }}>{m.emoji}</span><span style={{ ...difColor(m.dificuldade), padding: "2px 8px", borderRadius: 99, fontSize: ".7rem" }}>{m.dificuldade}</span></div>
                 <h3 style={{ margin: "0 0 4px", fontSize: "1rem" }}>{m.titulo}</h3>
                 <p style={{ fontSize: ".85rem", color: "var(--muted)", margin: 0 }}>{m.descricao}</p>
                 <p style={{ fontSize: ".75rem", color: "var(--accent)", marginTop: 8 }}>{m.objetivo}</p>
@@ -174,9 +231,10 @@ export default function AcademyPage() {
 
             <div className="card" style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center" }}>
               <p style={{ color: "var(--muted)", fontSize: ".85rem" }}>{modulos.find(m => m.id === moduloId)?.titulo} com {perfis.find(p => p.id === perfilId)?.nome}</p>
-              <button onClick={() => iniciar(false)} style={{ marginTop: 16, padding: "14px 32px", borderRadius: 50, fontSize: "1.1rem" }}>▶ Iniciar Roleplay</button>
-              <button onClick={() => iniciar(true)} className="ghost" style={{ marginTop: 12 }}>📞 Iniciar ligação (simulada)</button>
-              <Link href="/admin/properties" className="button ghost" style={{ marginTop: 12 }}>+ Adicionar apartamento</Link>
+              <button onClick={() => iniciar(false)} disabled={loading} style={{ marginTop: 16, padding: "14px 32px", borderRadius: 50, fontSize: "1.1rem" }}>▶ Iniciar Roleplay</button>
+              <button onClick={() => iniciar(true)} disabled={loading} className="ghost" style={{ marginTop: 12 }}>📞 Iniciar ligação (simulada)</button>
+              {modulos.length === 0 && <p style={{ color: "var(--muted)", fontSize: ".8rem", marginTop: 12 }}>Carregando módulos...</p>}
+              {erro && <p style={{ color: "#ff6b6b", fontSize: ".85rem", marginTop: 12 }}>{erro}</p>}
             </div>
           </div>
         </main>
@@ -200,7 +258,10 @@ export default function AcademyPage() {
             <div ref={bottom} />
           </div>
           <form onSubmit={(e) => { e.preventDefault(); enviar(); }} style={{ padding: 16, borderTop: "1px solid var(--line)", background: "var(--panel)" }}>
-            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") enviar(); }} placeholder="Digite sua mensagem..." style={{ width: "100%" }} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Digite sua mensagem..." style={{ flex: 1 }} />
+              <MicButton onText={(t) => setInput((prev) => (prev ? prev + " " : "") + t)} title="Falar mensagem" />
+            </div>
             <p style={{ fontSize: ".75rem", color: "var(--muted)", marginTop: 8 }}>Para encerrar, digite <strong>ENCERRAR TREINO</strong>.</p>
           </form>
         </main>
@@ -218,8 +279,8 @@ export default function AcademyPage() {
             <button onClick={carregarImoveis}>Buscar</button>
             <button onClick={() => { setBusca(""); setBairro(""); setMinPrice(""); setMaxPrice(""); carregarImoveis(); }} className="ghost">Limpar</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16, marginTop: 16 }}>
-            {imoveis.map(i => <PropertyCard key={i.id} i={i} onClick={() => setSelecionado(i)} />)}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(260px, 100%), 1fr))", gap: 16, marginTop: 16 }}>
+            {imoveis.map(i => <PropertyCard key={i.id} i={i} onClick={() => { setSelecionado(i); setSelectedFoto(0); }} />)}
           </div>
 
           {selecionado && (
@@ -259,23 +320,37 @@ export default function AcademyPage() {
         <main style={{ flex: 1, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: 12, borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between" }}>
             <span>{modulos.find(m => m.id === moduloId)?.titulo} — {perfis.find(p => p.id === perfilId)?.nome}</span>
-            <span style={{ color: "var(--muted)" }}>{chamando ? "📞 Em chamada (integração ElevenLabs em breve)" : "Pronto para ligar"}</span>
+            <span style={{ color: "var(--muted)" }}>
+              {conversation.status === "connected" ? (conversation.isSpeaking ? "� Cliente falando..." : "🎙️ Ouvindo você...") : chamando ? "📞 Conectando..." : "Pronto para ligar"}
+            </span>
           </div>
-          <div style={{ flex: 1, padding: 24 }}>
+          <div style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column" }}>
             {!sessaoAtiva ? (
               <div className="card" style={{ textAlign: "center" }}>
                 <h2>Modo Ligação</h2>
-                <p style={{ color: "var(--muted)" }}>Selecione um módulo e um perfil na aba Home e clique abaixo para simular uma ligação.</p>
+                <p style={{ color: "var(--muted)" }}>Selecione um módulo e um perfil na aba Home e clique abaixo para simular uma ligação por voz. O navegador vai pedir permissão de microfone.</p>
                 <button onClick={() => iniciar(true)} style={{ marginTop: 16 }}>📞 Iniciar ligação</button>
               </div>
             ) : (
-              <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-                <p style={{ fontSize: "1.5rem" }}>📞</p>
-                <p>Chamada em andamento... (ElevenLabs será integrado aqui)</p>
-                <div style={{ display: "flex", gap: 12 }}>
-                  <button onClick={encerrar} className="ghost" style={{ background: "var(--danger)", color: "white" }}>Encerrar</button>
+              <>
+                <div className="card" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+                  <p style={{ fontSize: "1.5rem", margin: 0 }}>📞</p>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontWeight: 600 }}>{perfis.find(p => p.id === perfilId)?.nome}</p>
+                    <p style={{ margin: 0, fontSize: ".85rem", color: "var(--muted)" }}>{Math.floor(duracao / 60)}:{String(duracao % 60).padStart(2, "0")}</p>
+                  </div>
+                  <button onClick={encerrar} className="ghost" disabled={loading} style={{ background: "var(--danger)", color: "white" }}>{loading ? "Avaliando..." : "Encerrar"}</button>
                 </div>
-              </div>
+                {callErro && <p style={{ color: "var(--danger)" }}>{callErro}</p>}
+                <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {msgs.map((m, i) => (
+                    <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "75%", padding: "8px 12px", borderRadius: 12, background: m.role === "user" ? "var(--accent)" : "var(--panel)", fontSize: ".9rem" }}>
+                      {m.content}
+                    </div>
+                  ))}
+                  <div ref={bottom} />
+                </div>
+              </>
             )}
           </div>
         </main>
@@ -292,22 +367,25 @@ export default function AcademyPage() {
               <div key={h.id} className="card" onClick={() => setCriterio(criterio === h.id ? null : h.id)} style={{ cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div>
-                    <h3 style={{ margin: 0 }}>{h.training_modules?.titulo || "—"}</h3>
-                    <p style={{ color: "var(--muted)", margin: "4px 0 0" }}>{h.training_profiles?.nome || "—"} • {new Date(h.created_at).toLocaleDateString("pt-BR")}</p>
+                    <h3 style={{ margin: 0 }}>{h.feedback?.modo === "ligacao" ? "📞" : "💬"} {h.training_modules?.titulo || "—"}</h3>
+                    <p style={{ color: "var(--muted)", margin: "4px 0 0" }}>
+                      {h.training_profiles?.nome || "—"} • {new Date(h.created_at).toLocaleDateString("pt-BR")} às {new Date(h.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                      {h.duracao_segundos > 0 ? ` • ⏱ ${fmt(h.duracao_segundos)}` : ""}
+                    </p>
                   </div>
                   <p style={{ color: "var(--accent)", fontSize: "1.5rem", fontWeight: 700 }}>{h.nota ?? "—"}</p>
                 </div>
-                {criterio === h.id && h.training_evaluations?.[0] && (
+                {criterio === h.id && h.feedback && (
                   <div style={{ marginTop: 16, padding: 12, background: "var(--panel)", borderRadius: 12 }}>
-                    <p><strong>Nota final:</strong> {h.training_evaluations[0].nota_final}</p>
+                    <p><strong>Nota final:</strong> {h.feedback.nota_final}</p>
                     {["abertura", "qualificacao", "apresentacao", "objecoes", "fechamento", "linguagem", "empatia"].map((c) => (
                       <div key={c} style={{ margin: "8px 0" }}>
-                        <strong>{c}</strong>: {h.training_evaluations[0][`${c}_nota`]} — {h.training_evaluations[0][`${c}_feedback`]}
+                        <strong>{c}</strong>: {h.feedback[`${c}_nota`]} — {h.feedback[`${c}_feedback`]}
                       </div>
                     ))}
-                    <p><strong>Pontos fortes:</strong> {h.training_evaluations[0].pontos_fortes?.join(", ")}</p>
-                    <p><strong>Pontos de melhoria:</strong> {h.training_evaluations[0].pontos_melhora?.join(", ")}</p>
-                    <p><strong>Ações sugeridas:</strong> {h.training_evaluations[0].acoes_sugeridas?.join(", ")}</p>
+                    <p><strong>Pontos fortes:</strong> {h.feedback.pontos_fortes?.join(", ")}</p>
+                    <p><strong>Pontos de melhoria:</strong> {h.feedback.pontos_melhora?.join(", ")}</p>
+                    <p><strong>Ações sugeridas:</strong> {h.feedback.acoes_sugeridas?.join(", ")}</p>
                   </div>
                 )}
               </div>
@@ -320,12 +398,22 @@ export default function AcademyPage() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
           <div className="card" style={{ width: 500, maxHeight: "80vh", overflow: "auto" }}>
             <h2>Feedback da IA</h2>
-            <p style={{ fontSize: "1.5rem", fontWeight: 700, padding: "8px 16px", borderRadius: 12, display: "inline-block", background: notaColor(feedback.nota).bg, color: notaColor(feedback.nota).color }}>Nota: {feedback.nota}</p>
-            <p style={{ margin: "16px 0" }}>{feedback.feedback_geral}</p>
+            <p style={{ fontSize: "1.5rem", fontWeight: 700, padding: "8px 16px", borderRadius: 12, display: "inline-block", background: notaColor(feedback.nota_final).bg, color: notaColor(feedback.nota_final).color }}>Nota: {feedback.nota_final}</p>
+            {["abertura", "qualificacao", "apresentacao", "objecoes", "fechamento", "linguagem", "empatia"].map((c) => (
+              <div key={c} style={{ margin: "8px 0", fontSize: ".9rem" }}>
+                <strong style={{ textTransform: "capitalize" }}>{c}</strong>: {feedback[`${c}_nota`]} — <span style={{ color: "var(--muted)" }}>{feedback[`${c}_feedback`]}</span>
+              </div>
+            ))}
             <h4>Pontos fortes</h4>
             <ul>{feedback.pontos_fortes?.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
             <h4>Pontos de melhoria</h4>
             <ul>{feedback.pontos_melhora?.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
+            {feedback.acoes_sugeridas && feedback.acoes_sugeridas.length > 0 && (
+              <>
+                <h4>Ações sugeridas</h4>
+                <ul>{feedback.acoes_sugeridas.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
+              </>
+            )}
             <button onClick={() => setFeedback(null)} style={{ marginTop: 16 }}>Fechar</button>
           </div>
         </div>

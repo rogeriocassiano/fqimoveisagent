@@ -3,7 +3,7 @@ import { z } from "zod";
 import { searchProperties } from "@/lib/properties";
 import { NextRequest, NextResponse } from "next/server";
 
-const filtersSchema = z.object({ city: z.string().optional(), neighborhood: z.string().optional(), type: z.string().optional(), bedrooms: z.coerce.number().int().positive().optional(), minPrice: z.coerce.number().nonnegative().optional(), maxPrice: z.coerce.number().nonnegative().optional() });
+const filtersSchema = z.object({ city: z.string().optional(), neighborhood: z.string().optional(), type: z.string().optional(), bedrooms: z.coerce.number().int().positive().optional(), minPrice: z.coerce.number().nonnegative().optional(), maxPrice: z.coerce.number().nonnegative().optional(), reference: z.string().optional(), q: z.string().optional() });
 
 const propertySchema = z.object({
   reference: z.string().min(1),

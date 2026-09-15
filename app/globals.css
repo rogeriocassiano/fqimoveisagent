@@ -77,3 +77,13 @@ header img { height: 40px; width: auto; }
 .eyebrow { color: var(--accent); letter-spacing: .12em; text-transform: uppercase; font-size: .75rem; font-weight: 700; }
 .lead { color: var(--muted); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); color: var(--text); }
+
+@media (max-width: 640px) {
+  header { padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+  header img { height: 30px; }
+  header nav { gap: 6px; flex-wrap: wrap; }
+  header nav .button, header nav button { padding: 7px 10px; font-size: .78rem; }
+  .card { padding: 14px; overflow-x: auto; }
+  input, textarea, select { font-size: 16px; }
+  main { min-width: 0; }
+}

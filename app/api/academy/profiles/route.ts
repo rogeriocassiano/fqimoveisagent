@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/supabase";
+import { getSessionUser, hasAdminAccess } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET() {
@@ -9,6 +10,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  if (!hasAdminAccess(user.role)) return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+
   const db = adminDb();
   const body = await req.json();
   const { data, error } = await db.from("training_profiles").insert({

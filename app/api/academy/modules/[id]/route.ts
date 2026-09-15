@@ -1,7 +1,18 @@
 import { adminDb } from "@/lib/supabase";
+import { getSessionUser, hasAdminAccess } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
+async function requireAdmin(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  if (!hasAdminAccess(user.role)) return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+  return null;
+}
+
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   const db = adminDb();
   const { id } = await params;
   const body = await req.json();
@@ -21,6 +32,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   const db = adminDb();
   const { id } = await params;
   const { error } = await db.from("training_modules").delete().eq("id", id);

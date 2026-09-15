@@ -1,5 +1,6 @@
 import { adminDb } from "@/lib/supabase";
 import { answerWithGemini } from "@/lib/gemini";
+import { getSessionUser } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 const PROMPT = `Você é um gestor de vendas rigoroso avaliando uma simulação de ligação de um corretor da FQ Imóveis com um cliente fictício.
@@ -30,8 +31,11 @@ Retorne APENAS um JSON no seguinte formato, sem explicação fora do JSON:
 }`;
 
 export async function POST(req: NextRequest) {
+  const user = await getSessionUser(req);
+  if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+
   const db = adminDb();
-  const { sessionId } = await req.json();
+  const { sessionId, duracao } = await req.json();
   if (!sessionId) return NextResponse.json({ error: "sessionId obrigatório" }, { status: 400 });
 
   const { data: session, error } = await db.from("roleplay_sessions").select("*, training_modules(titulo)").eq("id", sessionId).single();
@@ -45,16 +49,25 @@ export async function POST(req: NextRequest) {
   if (!jsonMatch) return NextResponse.json({ error: "Avaliação inválida da IA" }, { status: 500 });
 
   const avaliacao = JSON.parse(jsonMatch[0]);
-  const { data: saved, error: saveError } = await db.from("training_evaluations").insert({
+
+  // Persiste sempre na sessão (fonte de verdade para o histórico).
+  // Preserva o "modo" (ligacao) gravado no início da sessão.
+  const prevFeedback = (session.feedback ?? {}) as Record<string, unknown>;
+  const update: Record<string, unknown> = {
+    nota: avaliacao.nota_final,
+    feedback: { ...avaliacao, ...(prevFeedback.modo ? { modo: prevFeedback.modo } : {}) },
+  };
+  if (typeof duracao === "number" && duracao >= 0) update.duracao_segundos = Math.round(duracao);
+  await db.from("roleplay_sessions").update(update).eq("id", sessionId);
+
+  // Guarda também na tabela de avaliações quando ela existir (migration 20260911_evaluations.sql)
+  const { error: saveError } = await db.from("training_evaluations").insert({
     session_id: sessionId,
     vendedor_email: session.vendedor_email,
     modulo_titulo: session.training_modules?.titulo || "",
     ...avaliacao,
-  }).select().single();
+  });
+  if (saveError) console.error("save_evaluation_failed", saveError.message);
 
-  if (saveError) return NextResponse.json({ error: saveError.message }, { status: 500 });
-
-  await db.from("roleplay_sessions").update({ nota: avaliacao.nota_final, feedback: avaliacao }).eq("id", sessionId);
-
-  return NextResponse.json({ avaliacao: saved });
+  return NextResponse.json({ avaliacao });
 }

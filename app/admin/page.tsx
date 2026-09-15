@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import MicButton from "../components/MicButton";
 
 type Agent = {
   id: string;
@@ -25,7 +26,11 @@ export default function AdminPage() {
   const [sourceAgentId, setSourceAgentId] = useState("");
   const [sourceForm, setSourceForm] = useState<{ type: SourceType; title: string; content: string; uri: string; file?: File }>({ type: "document", title: "", content: "", uri: "" });
   const [sourceLoading, setSourceLoading] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const promptAudioRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1];
@@ -59,6 +64,20 @@ export default function AdminPage() {
     }
   }
 
+  async function excluirAgente(id: string, name: string) {
+    if (!confirm(`Excluir o agente "${name}"?\n\nIsso apaga também fontes, treinamentos, conversas e sessões de WhatsApp vinculadas. Essa ação não pode ser desfeita.`)) return;
+    setDeleting(id);
+    const res = await fetch(`/api/agents/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setDeleting(null);
+    if (res.ok) {
+      setAgents((prev) => prev.filter((a) => a.id !== id));
+      if (sourceAgentId === id) setSourceAgentId("");
+    } else {
+      alert(data.error || "Erro ao excluir agente");
+    }
+  }
+
   async function suggest() {
     setSuggesting(true);
     const res = await fetch("/api/agents/suggest", { method: "POST" });
@@ -68,6 +87,23 @@ export default function AdminPage() {
       setForm((prev) => ({ ...prev, ...data.suggestion }));
     } else {
       alert(data.error || "Erro ao gerar sugestão");
+    }
+  }
+
+  async function transcribePrompt() {
+    if (!audioFile) return;
+    setTranscribing(true);
+    const body = new FormData();
+    body.append("file", audioFile);
+    const res = await fetch("/api/extract", { method: "POST", body });
+    const data = await res.json();
+    setTranscribing(false);
+    if (data.text) {
+      setForm((prev) => ({ ...prev, system_prompt: prev.system_prompt ? `${prev.system_prompt}\n\n${data.text}` : data.text }));
+      setAudioFile(null);
+      if (promptAudioRef.current) promptAudioRef.current.value = "";
+    } else {
+      alert(data.error || "Erro ao transcrever áudio");
     }
   }
 
@@ -115,8 +151,10 @@ export default function AdminPage() {
           <p className="lead">Crie agentes, adicione fontes de conhecimento e teste o comportamento da IA.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link href="/admin/users" className="button ghost">Usuários</Link>
           <Link href="/admin/academy" className="button ghost">Gerenciar Academy</Link>
           <Link href="/admin/properties" className="button ghost">Apartamentos</Link>
+          <Link href="/admin/whatsapp" className="button ghost">WhatsApp</Link>
           <Link href="/admin/settings" className="button ghost">Configurações</Link>
           <Link href="/admin/files" className="button ghost">Ver arquivos enviados</Link>
         </div>
@@ -134,8 +172,14 @@ export default function AdminPage() {
         <form onSubmit={create} style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome do agente" required />
-            <input value={form.persona} onChange={(e) => setForm({ ...form, persona: e.target.value })} placeholder="Persona (ex: corretor especialista)" />
-            <input value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })} placeholder="Tom (ex: cordial, direto, formal)" />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={form.persona} onChange={(e) => setForm({ ...form, persona: e.target.value })} placeholder="Persona (ex: corretor especialista)" style={{ flex: 1 }} />
+              <MicButton onText={(t) => setForm((prev) => ({ ...prev, persona: t }))} title="Ditar persona" />
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })} placeholder="Tom (ex: cordial, direto, formal)" style={{ flex: 1 }} />
+              <MicButton onText={(t) => setForm((prev) => ({ ...prev, tone: t }))} title="Ditar tom" />
+            </div>
           </div>
 
           <div style={{ position: "relative" }}>
@@ -146,7 +190,12 @@ export default function AdminPage() {
               rows={6}
               style={{ width: "100%", fontFamily: "monospace", fontSize: ".9rem" }}
             />
-            <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 8 }}>
+            <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 8, alignItems: "center" }}>
+              <input ref={promptAudioRef} type="file" accept="audio/*" onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
+              {audioFile && <span style={{ fontSize: ".75rem", color: "var(--muted)" }}>{audioFile.name}</span>}
+              <MicButton onText={(t) => setForm((prev) => ({ ...prev, system_prompt: prev.system_prompt ? `${prev.system_prompt}\n\n${t}` : t }))} title="Ditar prompt" />
+              <button type="button" onClick={() => promptAudioRef.current?.click()} className="ghost" style={{ fontSize: ".8rem" }}>🎤 Áudio</button>
+              {audioFile && <button type="button" onClick={transcribePrompt} disabled={transcribing} className="ghost" style={{ fontSize: ".8rem" }}>{transcribing ? "Transcrevendo..." : "✨ Usar áudio"}</button>}
               <button type="button" onClick={improve} disabled={improving} className="ghost" style={{ fontSize: ".8rem" }}>{improving ? "Melhorando..." : "✨ Melhorar prompt"}</button>
             </div>
           </div>
@@ -180,7 +229,10 @@ export default function AdminPage() {
             <input value={sourceForm.title} onChange={(e) => setSourceForm({ ...sourceForm, title: e.target.value })} placeholder="Título da fonte" required />
           </div>
           {sourceForm.type === "text" && (
-            <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...)" rows={5} />
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...) ou dite pelo microfone" rows={5} style={{ flex: 1 }} />
+              <MicButton onText={(t) => setSourceForm((prev) => ({ ...prev, content: prev.content ? `${prev.content}\n\n${t}` : t }))} title="Ditar conteúdo" />
+            </div>
           )}
           {sourceForm.type === "url" && (
             <input value={sourceForm.uri} onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })} placeholder="https://..." />
@@ -199,7 +251,7 @@ export default function AdminPage() {
       <section>
         <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Agentes criados</h2>
         {agents.length === 0 && <p style={{ color: "var(--muted)" }}>Nenhum agente criado ainda.</p>}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))", gap: 16 }}>
           {agents.map((agent) => (
             <article key={agent.id} className="card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
               <div>
@@ -211,7 +263,12 @@ export default function AdminPage() {
                 <p style={{ margin: "0 0 4px", fontSize: ".85rem", color: "var(--muted)" }}><strong>Tom:</strong> {agent.tone || "—"}</p>
                 <p style={{ margin: "0 0 12px", fontSize: ".85rem", color: "var(--muted)" }}><strong>Status:</strong> {agent.status}</p>
               </div>
-              <Link href={`/admin/${agent.id}`} className="button" style={{ width: "100%", textAlign: "center" }}>Abrir treinamento</Link>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Link href={`/admin/${agent.id}`} className="button" style={{ flex: 1, textAlign: "center" }}>Abrir treinamento</Link>
+                <button type="button" onClick={() => excluirAgente(agent.id, agent.name)} disabled={deleting === agent.id} className="ghost" style={{ color: "#ff6b6b", borderColor: "#ff6b6b" }} title="Excluir agente">
+                  {deleting === agent.id ? "..." : "🗑"}
+                </button>
+              </div>
             </article>
           ))}
         </div>

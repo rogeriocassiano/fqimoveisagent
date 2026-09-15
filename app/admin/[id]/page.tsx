@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import MicButton from "../../components/MicButton";
 
 
 type Source = { id: string; type: string; title: string; uri?: string; status: string };
@@ -22,7 +23,6 @@ export default function AgentDetailPage() {
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [loading, setLoading] = useState(false);
   const [training, setTraining] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
 
@@ -71,16 +71,6 @@ export default function AgentDetailPage() {
     setLoading(false); setSourceForm((prev) => ({ ...prev, file: undefined }));
   }
 
-  function startVoice() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert("Seu navegador não suporta reconhecimento de voz."); return; }
-    const rec = new SR();
-    rec.lang = "pt-BR"; rec.interimResults = false;
-    rec.onresult = (ev) => { const t = Array.from(ev.results).map((r) => r[0].transcript).join(""); setMessage((prev) => (prev ? prev + " " : prev) + t); };
-    rec.start(); setRecording(true);
-    setTimeout(() => { rec.stop(); setRecording(false); }, 10000);
-  }
-
   if (!agent) return <main style={{ padding: 24 }}><p className="lead">Carregando...</p></main>;
 
   return (
@@ -116,7 +106,10 @@ export default function AgentDetailPage() {
                 <input value={sourceForm.title} onChange={(e) => setSourceForm({ ...sourceForm, title: e.target.value })} placeholder="Título da fonte" required />
               </div>
               {sourceForm.type === "text" && (
-                <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...)" rows={6} />
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...) ou dite pelo microfone" rows={6} style={{ flex: 1 }} />
+                  <MicButton onText={(t) => setSourceForm((prev) => ({ ...prev, content: prev.content ? `${prev.content}\n\n${t}` : t }))} title="Ditar conteúdo" />
+                </div>
               )}
               {sourceForm.type === "url" && (
                 <input value={sourceForm.uri} onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })} placeholder="https://..." />
@@ -135,7 +128,7 @@ export default function AgentDetailPage() {
           <section>
             <h2 style={{ margin: "0 0 16px", fontSize: "1.1rem" }}>Fontes do agente</h2>
             {agent.sources.length === 0 && <p style={{ color: "var(--muted)" }}>Nenhuma fonte adicionada ainda.</p>}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 16 }}>
               {agent.sources.map((source) => (
                 <div key={source.id} className="card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                   <div>
@@ -175,7 +168,7 @@ export default function AgentDetailPage() {
           <form onSubmit={sendMessage} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <input ref={fileRef} type="file" accept="image/*,audio/*,video/*,.pdf,.xlsx,.xls,.csv,.txt,.doc,.docx" onChange={(e) => setSourceForm((prev) => ({ ...prev, file: e.target.files?.[0] }))} style={{ display: "none" }} />
             <button type="button" className="icon ghost" onClick={() => fileRef.current?.click()} title="Anexar arquivo">📎</button>
-            <button type="button" className="icon ghost" onClick={startVoice} title="Gravar áudio">{recording ? "⏹" : "🎤"}</button>
+            <MicButton onText={(t) => setMessage((prev) => (prev ? prev + " " : "") + t)} title="Falar mensagem" />
             {sourceForm.file && sourceForm.file.type.startsWith("image/") && <Image src={URL.createObjectURL(sourceForm.file)} alt="preview" width={60} height={40} style={{ borderRadius: 4, objectFit: "cover" }} />}
             <input value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) sendMessage(); }} placeholder="Escreva uma pergunta..." style={{ flex: 1 }} />
             <button type="submit" disabled={loading || (!message.trim() && !sourceForm.file)} className="icon">➤</button>
