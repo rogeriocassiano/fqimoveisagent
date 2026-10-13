@@ -29,6 +29,12 @@ npm test
 npm run build
 ```
 
+## Testes end-to-end
+
+- `npm run e2e` — suíte E2E contra banco Supabase e Gemini reais (treinar fonte, conversar com contexto, resolver imóvel, gerar flyer, enviar PDF existente, webhook HTTP). Requer `.env` e, para os testes HTTP, o dev server em `localhost:3000`.
+- `npm run wa:sim` — simulador de WhatsApp no terminal que age como o wa-server (sem QR): envie mensagens como se fosse um grupo e veja o agente responder com texto, fotos e PDFs (baixados em `wa-sim-media/`). Ex.: `npm run wa:sim -- --message "manda as fotos do ref 123"`. Usa a variável `WA_SERVICE_SECRET` do `.env`.
+- `npm run sync:flyers` — sincroniza os PDFs/flyers da pasta pública do Google Drive (`FLYERS_DRIVE_FOLDER_ID` no `.env`) para a tabela `sources`, com título = empreendimento + arquivo e link direto de download. Rode novamente após atualizar a pasta. O agente envia esses PDFs no WhatsApp pelo nome (ex: "manda o PDF do Place Caçara").
+
 ## Implantação
 
 Crie um projeto Supabase, execute a migration em `supabase/migrations` e configure no serviço Railway as variáveis listadas em `.env.example`. O endpoint de saúde é `/api/health` e o webhook Meta é `/api/webhooks/whatsapp`.

@@ -4,6 +4,7 @@ import { answerWithGemini } from "./gemini";
 import { extractTextFromFile } from "./extract";
 import { uploadFile } from "./storage";
 import { searchProperties } from "./properties";
+import { resolvePropertyForMedia } from "./whatsapp-media";
 import * as cheerio from "cheerio";
 
 const CHUNK_SIZE = 1000;
@@ -84,6 +85,13 @@ export async function addSource(
 ) {
   const db = adminDb();
   let storagePath: string | undefined;
+
+  if (input.type === "text" && !input.content?.trim()) {
+    throw new Error("Conteúdo obrigatório para fonte de texto");
+  }
+  if (input.type === "url" && !input.uri) {
+    throw new Error("URL obrigatória para fonte de site");
+  }
 
   if (input.file) {
     const { path } = await uploadFile(input.file);
@@ -210,6 +218,25 @@ async function buildChatContext(message: string, agentId?: string) {
         imoveis = await searchProperties({}, 20);
       }
       imoveisContext = `Catálogo de imóveis disponíveis:\n${imoveis.map((p: { reference?: string; title?: string; neighborhood?: string; sale_price?: number; bedrooms?: number; bathrooms?: number; parking_spaces?: number; area?: number; url?: string; payload?: { description?: string } }) => `- Ref ${p.reference}: ${p.title}, ${p.neighborhood}, R$ ${p.sale_price?.toLocaleString("pt-BR")}, ${p.bedrooms} quartos, ${p.bathrooms} banh, ${p.parking_spaces} vagas, ${p.area}m². Link: ${p.url}. Descrição: ${p.payload?.description ?? ""}`).join("\n")}`;
+
+      // imóvel específico consultado por nome (ex: "fale sobre o Sensia Solarium") → detalhes completos
+      const resolution = await resolvePropertyForMedia(message);
+      if (resolution.kind === "single") {
+        const p = resolution.property;
+        const details = [
+          `Detalhes do imóvel consultado — Ref ${p.reference}: ${p.title ?? ""}`,
+          [p.neighborhood, p.city].filter(Boolean).join(" - "),
+          p.address ?? "",
+          `Venda: R$ ${p.sale_price?.toLocaleString("pt-BR")}`,
+          [p.bedrooms != null ? `${p.bedrooms} quartos` : null, p.suites ? `${p.suites} suítes` : null, p.bathrooms != null ? `${p.bathrooms} banheiros` : null, p.parking_spaces ? `${p.parking_spaces} vagas` : null, p.area ? `${p.area} m²` : null].filter(Boolean).join(", "),
+          (p.payload?.description ?? "").slice(0, 1500),
+          p.payload?.unit_features ? `Unidade: ${p.payload.unit_features}` : "",
+          p.payload?.building_features ? `Empreendimento: ${p.payload.building_features}` : "",
+          p.url ? `Anúncio: ${p.url}` : "",
+          `${p.payload?.photos?.length ?? 0} fotos cadastradas`,
+        ].filter(Boolean).join("\n");
+        imoveisContext = `${imoveisContext}\n\n${details}`;
+      }
     } catch (e) {
       console.warn("property_lookup_failed", e instanceof Error ? e.message : "unknown");
     }
@@ -285,9 +312,14 @@ Quando alguém disser "oi", "olá" ou "tudo bem", responda de forma descontraíd
 
 Você foi desenvolvido pelo engenheiro de software Rogério Cassiano para a FQ Imóveis. Seu treinamento é feito pelo diretor de vendas e pela gestão da FQ Imóveis.
 
+Suas capacidades no WhatsApp:
+- Você ENVIA FOTOS e PDFs/flyers dos imóveis automaticamente quando pedirem — o sistema anexa por você. NUNCA diga que não consegue enviar fotos, PDFs ou arquivos.
+- Você ENTENDE ÁUDIOS/voicenotes — o sistema transcreve antes de chegar a você. Pode pedir para gravarem tranquilo.
+- Se alguém pedir mídia, ela já foi enviada junto com sua resposta; sua parte é só confirmar e passar os dados do imóvel.
+
 Seu tom geral é: ${tone || "despojado e profissional"}. Sua persona na empresa é: ${persona || "aprendiz do diretor de vendas"}.
 
-Sempre que possível, use o contexto abaixo. Se a pergunta for sobre um imóvel específico (ref, nome do empreendimento, bairro, preço), use PREFERENCIALMENTE os dados do catálogo de imóveis. Forneça o link, preço e detalhes quando disponíveis. Se a resposta não estiver no contexto, seja honesto, diga que ainda está aprendendo e ofereça encaminhar para um corretor humano.
+Sempre que possível, use o contexto abaixo. Se a pergunta for sobre um imóvel específico (ref, nome do empreendimento, bairro, preço), responda sobre AQUELE imóvel individualmente usando os detalhes completos do "imóvel consultado" — preço, quartos, área, link, descrição. Se perguntarem o que tem em um bairro, liste as opções do catálogo com ref e preço. Se a resposta não estiver no contexto, seja honesto, diga que ainda está aprendendo e ofereça encaminhar para um corretor humano.
 
 Contexto:
 ${context || "Nenhum contexto fornecido."}

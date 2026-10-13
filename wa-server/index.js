@@ -3,6 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
   Browsers,
 } from "@whiskeysockets/baileys";
 import express from "express";
@@ -56,6 +57,29 @@ function extractText(m) {
     msg.videoMessage?.caption ||
     ""
   ).trim();
+}
+
+async function sendMedia(sock, jid, media, quoted) {
+  for (const item of media ?? []) {
+    try {
+      if (item?.type === "image") {
+        await sock.sendMessage(jid, { image: { url: item.url }, caption: item.caption || undefined }, { quoted });
+      } else if (item?.type === "document") {
+        await sock.sendMessage(
+          jid,
+          {
+            document: { url: item.url },
+            fileName: item.fileName || "arquivo.pdf",
+            mimetype: item.mimetype || "application/pdf",
+            caption: item.caption || undefined,
+          },
+          { quoted }
+        );
+      }
+    } catch (err) {
+      logger.error({ err: String(err) }, "send_media_failed");
+    }
+  }
 }
 
 async function startSession(id) {
@@ -122,22 +146,66 @@ async function startSession(id) {
       try {
         const jid = m.key?.remoteJid;
         if (!jid || m.key?.fromMe) continue;
-        if (jid.endsWith("@g.us") || jid === "status@broadcast") continue;
+        if (jid === "status@broadcast") continue;
 
-        const text = extractText(m);
-        if (!text) continue;
+        const isGroup = jid.endsWith("@g.us");
+        let text = extractText(m);
+        const me = sock.user?.id?.split(":")[0];
+
+        if (isGroup) {
+          // em grupo responde quando @mencionado ou quando respondem/citam o bot
+          const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
+          const quotedParticipant =
+            (m.message?.extendedTextMessage?.contextInfo?.participant ??
+              m.message?.audioMessage?.contextInfo?.participant ??
+              m.message?.pttMessage?.contextInfo?.participant)?.split?.(":")[0];
+          const repliedToBot = Boolean(quotedParticipant && quotedParticipant === me);
+          const mentionedMe = mentioned.some((j) => typeof j === "string" && j.split(":")[0] === me);
+          if (!mentionedMe && !repliedToBot) continue;
+          text = text.replace(/@\d+/g, "").replace(/\s+/g, " ").trim();
+        }
+
+        // áudios/voicenotes: baixa e envia em base64 para transcrição no app
+        let audio = null;
+        let audioMimetype = null;
+        if (m.message?.audioMessage || m.message?.pttMessage) {
+          const audioMsg = m.message.audioMessage ?? m.message.pttMessage;
+          const allowed = !isGroup || (audioMsg?.contextInfo?.participant?.split(":")[0] === me);
+          if (allowed) {
+            try {
+              const buffer = await downloadMediaMessage(m, "buffer", {}, logger);
+              if (buffer && buffer.length <= 12 * 1024 * 1024) {
+                audio = buffer.toString("base64");
+                audioMimetype = (audioMsg?.mimetype || "audio/ogg").split(";")[0];
+              }
+            } catch (err) {
+              logger.error({ err: String(err) }, "audio_download_failed");
+            }
+          }
+        }
+
+        if (!text && !audio) continue;
 
         const from = jid.split("@")[0];
+        const participant = isGroup ? (m.key?.participant?.split("@")[0] ?? null) : null;
         const data = await postMessage(id, {
           type: "message",
           sessionId: id,
           from,
+          participant,
+          isGroup,
           pushName: m.pushName || null,
           text,
+          audio,
+          audioMimetype,
         });
 
+        const quoted = isGroup ? m : undefined;
         if (data?.reply) {
-          await sock.sendMessage(jid, { text: data.reply });
+          await sock.sendMessage(jid, { text: data.reply }, { quoted });
+        }
+        if (Array.isArray(data?.media) && data.media.length) {
+          await sendMedia(sock, jid, data.media, quoted);
         }
       } catch (err) {
         logger.error({ err: String(err) }, "message_handler_failed");

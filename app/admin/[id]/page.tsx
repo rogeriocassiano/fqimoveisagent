@@ -107,12 +107,12 @@ export default function AgentDetailPage() {
               </div>
               {sourceForm.type === "text" && (
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                  <textarea value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...) ou dite pelo microfone" rows={6} style={{ flex: 1 }} />
+                  <textarea required value={sourceForm.content} onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })} placeholder="Cole aqui o conteúdo (livro, treinamento, conversa, apresentação...) ou dite pelo microfone" rows={6} style={{ flex: 1 }} />
                   <MicButton onText={(t) => setSourceForm((prev) => ({ ...prev, content: prev.content ? `${prev.content}\n\n${t}` : t }))} title="Ditar conteúdo" />
                 </div>
               )}
               {sourceForm.type === "url" && (
-                <input value={sourceForm.uri} onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })} placeholder="https://..." />
+                <input required value={sourceForm.uri} onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })} placeholder="https://..." />
               )}
               {sourceForm.type === "document" && (
                 <div style={{ padding: 16, border: "1px dashed var(--line)", borderRadius: 12, textAlign: "center" }}>

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import "./globals.css";
 import FloatingAssistant from "./components/FloatingAssistant";
 import PwaRegister from "./components/PwaRegister";
+import ThemeToggle from "./components/ThemeToggle";
 
 function getToken() {
   if (typeof document === "undefined") return null;
@@ -45,8 +46,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     return () => { clearInterval(interval); clearTimeout(timeout); window.removeEventListener("focus", update); };
   }, [pathname]);
 
-  return <html lang="pt-BR" className="dark">
+  return <html lang="pt-BR" className="dark" suppressHydrationWarning>
     <body>
+      <script
+        dangerouslySetInnerHTML={{
+          __html:
+            "try{if(localStorage.getItem('fq-theme')==='light')document.documentElement.classList.remove('dark')}catch(e){}",
+        }}
+      />
       <meta name="theme-color" content="#0f0f0f" />
       <meta name="mobile-web-app-capable" content="yes" />
       <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -62,6 +69,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             {!isTrainee && <Link href="/chat" className="button ghost">Chat</Link>}
             <Link href="/academy" className="button ghost">Academy</Link>
             {!isTrainee && <Link href="/admin" className="button ghost">Treinar</Link>}
+            <ThemeToggle />
             <button onClick={logout} className="button">Sair</button>
           </nav>
         </header>

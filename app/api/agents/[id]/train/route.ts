@@ -11,7 +11,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const result = await trainSource(parsed.data.source_id);
     return Response.json({ agent_id: id, ...result });
   } catch (error) {
-    console.error("train_source_failed", error instanceof Error ? error.message : "unknown");
-    return Response.json({ error: "Não foi possível treinar a fonte" }, { status: 503 });
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    console.error("train_source_failed", message);
+    return Response.json({ error: `Não foi possível treinar a fonte: ${message}` }, { status: 503 });
   }
 }

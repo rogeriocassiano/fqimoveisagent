@@ -1,17 +1,17 @@
 :root {
-  --bg: #ffffff;
-  --surface: #f9f9f9;
-  --panel: #ffffff;
-  --line: #e5e5e5;
+  --bg: #f0f0f0;
+  --surface: #e4e4e4;
+  --panel: #f8f8f8;
+  --line: #d9d9d9;
   --accent: #f47c20;
   --accent-light: #f9a34e;
   --gold: #d4af37;
   --text: #1a1a1a;
   --muted: #6b7280;
-  --user-bg: #fff3e6;
-  --assistant-bg: #f9f9f9;
+  --user-bg: #ffe8d4;
+  --assistant-bg: #ebebeb;
   --radius: 16px;
-  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
 
 :root.dark {

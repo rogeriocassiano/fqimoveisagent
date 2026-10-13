@@ -15,3 +15,10 @@ export async function downloadFile(path: string): Promise<Blob> {
   if (error || !data) throw error ?? new Error("Falha ao baixar arquivo");
   return data;
 }
+
+export async function signedDocumentUrl(path: string, expiresIn = 3600): Promise<string> {
+  const db = adminDb();
+  const { data, error } = await db.storage.from("documents").createSignedUrl(path, expiresIn);
+  if (error || !data?.signedUrl) throw error ?? new Error("Falha ao gerar URL assinada");
+  return data.signedUrl;
+}

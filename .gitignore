@@ -14,3 +14,6 @@ coverage/
 
 # WhatsApp service auth/session state
 wa-server/auth/
+
+# WhatsApp simulator output
+wa-sim-media/

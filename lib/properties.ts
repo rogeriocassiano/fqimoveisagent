@@ -11,7 +11,7 @@ export async function searchProperties(filters: PropertyFilters, limit = 1000) {
   if (filters.minPrice) query = query.gte("sale_price", filters.minPrice);
   if (filters.maxPrice) query = query.lte("sale_price", filters.maxPrice);
   if (filters.reference) query = query.eq("reference", filters.reference);
-  if (filters.q) query = query.or(`title.ilike.%${filters.q}%,reference.ilike.%${filters.q}%,neighborhood.ilike.%${filters.q}%`);
+  if (filters.q) query = query.or(`title.ilike.%${filters.q}%,reference.ilike.%${filters.q}%,neighborhood.ilike.%${filters.q}%,address.ilike.%${filters.q}%`);
   const { data, error } = await query;
   if (error) throw error;
   return data;

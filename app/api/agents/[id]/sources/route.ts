@@ -48,7 +48,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const source = await addSource(id, { type, title, content, uri, file });
     return Response.json({ source }, { status: 201 });
   } catch (error) {
-    console.error("add_source_failed", error instanceof Error ? error.message : "unknown");
-    return Response.json({ error: "Não foi possível adicionar a fonte" }, { status: 503 });
+    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    console.error("add_source_failed", message);
+    return Response.json({ error: message }, { status: 503 });
   }
 }
