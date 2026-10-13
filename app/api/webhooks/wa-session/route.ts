@@ -249,6 +249,27 @@ export async function POST(req: NextRequest) {
           pendingChoices.set(pendingKey, { properties: matched, ts: Date.now() });
           return NextResponse.json({ reply: `Ainda tenho mais de um candidato:\n${formatPropertyList(matched)}\nQual deles?` });
         }
+        // "manda o flyer deles" / "quero as 2 opções" — pedido de material sobre as opções listadas
+        if (detectMediaIntent(text)) {
+          const seen = new Set<string>();
+          const unique = pending.properties.filter((p) => {
+            const key = (p.title ?? p.reference).toLowerCase().trim();
+            return seen.has(key) ? false : (seen.add(key), true);
+          });
+          const media: MediaItem[] = [];
+          for (const option of unique.slice(0, 3)) {
+            const photo = option.payload?.photos?.[0];
+            if (photo) media.push({ type: "image", url: photo, caption: propertyCaption(option) });
+            media.push(...(await existingDocumentsMedia(propertySearchWords(option), agentId, `Flyer ${option.title ?? ""}`)).slice(0, 2));
+          }
+          pendingChoices.delete(pendingKey);
+          if (media.length) {
+            return NextResponse.json({
+              reply: `Mandei o material de ${unique.length > 3 ? "3 das" : "todas as"} opções: ${unique.slice(0, 3).map((p) => p.title ?? `Ref ${p.reference}`).join(", ")}.`,
+              media,
+            });
+          }
+        }
         pendingChoices.delete(pendingKey);
       }
     }

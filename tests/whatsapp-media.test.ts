@@ -196,6 +196,15 @@ describe("resolvePropertyForMedia", () => {
     const result = await resolvePropertyForMedia("manda as fotos", searchByRef);
     expect(result.kind).toBe("none");
   });
+
+  it("ignora palavra genérica residencial e não retorna falsos candidatos", async () => {
+    const search = async (filters: { reference?: string; q?: string }) => {
+      if (filters.q === "residencial") return [buriti];
+      return [];
+    };
+    const result = await resolvePropertyForMedia("manda o flyer do Residencial Safira", search);
+    expect(result.kind).toBe("none");
+  });
 });
 
 describe("formatação de mensagens", () => {

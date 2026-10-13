@@ -57,6 +57,7 @@ const FILLER_WORDS = new Set(
     "regiao", "região", "zona", "bairro", "area", "área", "tudo", "todos", "todas", "ver", "mostra", "mostre",
     "mostrar", "lista", "listar", "disponivel", "disponiveis", "disponível", "disponíveis", "gostaria",
     "tem", "temos", "algum", "alguma", "alguns", "algumas", "opcao", "opções", "opcoes", "vocês", "voces",
+    "residencial", "condominio", "condomínio", "edificio", "edifício", "torre", "lancamento", "lançamento",
   ].map(normalizeWord),
 );
 
@@ -88,10 +89,78 @@ function normalizeWord(text: string): string {
     .trim();
 }
 
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let previous = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const saved = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+      previous = saved;
+    }
+  }
+  return row[b.length];
+}
+
+/**
+ * 3 = token idêntico, 2 = substring/prefixo (mín. 4 letras), 1 = fuzzy (dist. edição).
+ * Direcional: "caicaras" casa "caicara", mas tokens curtos como "a" nunca casam.
+ */
+function tokenSimilarity(query: string, token: string): number {
+  if (query.length < 2 || token.length < 2) return 0;
+  if (token === query) return 3;
+  if (query.length < 4) return 0; // palavras de 2-3 letras: só exato (evita "be" casar "belém")
+  if (token.length < 4) return 0;
+  if (token.startsWith(query) || query.startsWith(token) || token.includes(query)) return 2;
+  const maxDist = query.length >= 6 ? 2 : 1;
+  return editDistance(query, token) <= maxDist ? 1 : 0;
+}
+
+/** Exato ou substring apenas — usado em endereço/bairro/descrição (sem fuzzy). */
+function looseTokenMatch(query: string, token: string): boolean {
+  if (query.length < 4 || token.length < 4) return token === query;
+  return token === query || token.startsWith(query) || token.includes(query) || query.startsWith(token);
+}
+
+/**
+ * Pontua um candidato contra as palavras da busca.
+ * Título aceita fuzzy; campos secundários só exato/substring; descrição só substring.
+ */
+function matchScore(
+  words: string[],
+  title: string,
+  secondary = "",
+  description = "",
+): { score: number; hits: number } {
+  const normalizedTitle = normalizeWord(title);
+  const titleTokens = normalizedTitle.split(/\W+/).filter(Boolean);
+  const secondaryTokens = normalizeWord(secondary).split(/\W+/).filter(Boolean);
+  const normalizedDesc = normalizeWord(description);
+  let hits = 0;
+  let score = 0;
+  for (const word of words) {
+    const titleLevel = Math.max(0, ...titleTokens.map((token) => tokenSimilarity(word, token)));
+    if (titleLevel === 3) score += 20;
+    else if (titleLevel === 2) score += 16;
+    else if (titleLevel === 1) score += 10;
+    else if (secondaryTokens.some((token) => looseTokenMatch(word, token))) score += 5;
+    else if (word.length >= 4 && normalizedDesc.includes(word)) score += 3;
+    else continue;
+    hits++;
+  }
+  const phrase = words.join(" ");
+  if (phrase && normalizedTitle.includes(phrase)) score += 100;
+  if (hits === words.length && words.length) score += 50;
+  return { score, hits };
+}
+
 export function propertySearchWords(p: Property): string[] {
-  const words = normalizeWord(`${p.title ?? ""} ${p.neighborhood ?? ""}`)
+  const all = normalizeWord(`${p.title ?? ""} ${p.neighborhood ?? ""}`)
     .split(/\W+/)
-    .filter((w) => w.length >= 4 && !GENERIC_TITLE_WORDS.has(w));
+    .filter((w) => w.length >= 2 && !GENERIC_TITLE_WORDS.has(w));
+  const distinctive = all.filter((w) => w.length >= 4);
+  const words = distinctive.length ? distinctive : all; // nomes curtos ("Be Up") usam tokens de 2-3 letras
   return [...new Set(words)].slice(0, 4);
 }
 
@@ -106,34 +175,58 @@ export async function findExistingPdfDocuments(words: string[], agentId?: string
   if (!wordsLower.length) return [];
 
   const db = adminDb();
-  // busca no banco por qualquer palavra (título bruto ou título normalizado no metadata)
-  const orFilter = wordsLower
-    .flatMap((w) => [`title.ilike.%${w}%`, `metadata->>search_title.ilike.%${w}%`])
-    .join(",");
+  // catálogo de documentos é pequeno (centenas) — carrega tudo e pontua em memória.
+  // Filtro ilike com limite trunca resultados quando a palavra é comum ("be", "sol").
   const { data, error } = await db
     .from("sources")
     .select("id, title, uri, agent_id")
     .eq("type", "document")
-    .or(orFilter)
-    .limit(100);
+    .limit(5000);
   if (error) return [];
   const docs = (data as { id: string; title: string | null; uri: string | null; agent_id: string | null }[] | null) ?? [];
 
-  const matching = docs
+  // frequência de cada palavra nos títulos — palavras raras valem mais (IDF)
+  const wordDf = new Map<string, number>();
+  for (const word of wordsLower) {
+    let df = 0;
+    for (const d of docs) {
+      const tokens = normalizeWord(d.title ?? "").split(/\W+/).filter(Boolean);
+      if (tokens.some((token) => tokenSimilarity(word, token) > 0)) df++;
+    }
+    wordDf.set(word, df || 1);
+  }
+
+  const scored = docs
     .filter((d) => typeof d.uri === "string" && isSendableDocumentUri(d.uri))
     .map((d) => {
       const title = normalizeWord(d.title ?? "");
-      const hits = wordsLower.filter((w) => title.includes(w)).length;
-      const flyerBoost = /folder|flyer|book|apresenta/.test(title) ? 1 : 0;
-      return { doc: d, hits, flyerBoost };
+      const titleTokens = title.split(/\W+/).filter(Boolean);
+      let hits = 0;
+      let score = 0;
+      for (const word of wordsLower) {
+        const level = Math.max(0, ...titleTokens.map((token) => tokenSimilarity(word, token)));
+        if (!level) continue;
+        hits++;
+        score += (level === 3 ? 20 : level === 2 ? 14 : 8) * Math.log2(1 + docs.length / (wordDf.get(word) ?? 1));
+      }
+      if (hits === wordsLower.length && wordsLower.length) score += 50;
+      const flyerBoost = /folder|flyer|book|apresenta|marketing/.test(title) ? 15 : 0;
+      const auxiliaryPenalty = /tabela|mapa|planta|memorial|convencao/.test(title) ? 10 : 0;
+      return { doc: d, hits, score: score + flyerBoost - auxiliaryPenalty };
     })
-    .filter((entry) => entry.hits > 0);
+    .filter((entry) => entry.hits > 0 && entry.score > 0);
 
-  // prioriza documentos que casam com TODAS as palavras; no empate, folders/books
-  const full = matching.filter((entry) => entry.hits === wordsLower.length);
-  const ranked = (full.length ? full : matching).sort(
-    (a, b) => b.hits - a.hits || b.flyerBoost - a.flyerBoost,
-  );
+  // passe estrito (todas as palavras); se vazio, aceita os docs com maior cobertura parcial
+  let matching = scored.filter((entry) => entry.hits === wordsLower.length);
+  if (!matching.length && scored.length) {
+    const bestHits = Math.max(...scored.map((entry) => entry.hits));
+    const relaxed = scored.filter((entry) => entry.hits === bestHits);
+    const topScore = Math.max(...relaxed.map((entry) => entry.score));
+    matching = relaxed.filter((entry) => entry.score >= topScore * 0.7);
+  }
+  if (!matching.length) return [];
+
+  const ranked = matching.sort((a, b) => b.score - a.score || a.doc.title?.localeCompare(b.doc.title ?? "") || 0);
 
   if (agentId) {
     const own = ranked.filter((entry) => entry.doc.agent_id === agentId);
@@ -157,37 +250,36 @@ export async function resolvePropertyForMedia(text: string, search: SearchFn = s
   }
 
   const words = candidateWords(text);
-  const wordHits: Property[][] = [];
-  for (const word of words) {
-    try {
-      wordHits.push((await search({ q: word }, 5)) ?? []);
-    } catch {
-      return { kind: "none" };
-    }
-  }
+  if (!words.length) return { kind: "none" };
 
-  const hits = new Map<string, Property & { hits: number }>();
-  for (let i = 0; i < wordHits.length; i++) {
-    for (const p of wordHits[i]) {
-      const entry = hits.get(p.reference);
-      if (entry) {
-        entry.hits++;
-      } else {
-        hits.set(p.reference, { ...p, hits: 1 });
+  let candidates: Property[] = [];
+  try {
+    if (search === searchProperties) {
+      candidates = ((await search({}, 1000)) ?? []) as Property[];
+    } else {
+      const found = new Map<string, Property>();
+      for (const word of words) {
+        for (const property of (await search({ q: word }, 20)) ?? []) found.set(property.reference, property);
       }
+      candidates = [...found.values()];
     }
+  } catch {
+    return { kind: "none" };
   }
 
-  let matches = [...hits.values()];
-  // prioriza imóveis que casam com TODAS as palavras (ex: "Sensia Solarium")
-  if (words.length > 1) {
-    const full = matches.filter((p) => p.hits === words.length);
-    if (full.length) matches = full;
-  }
+  const ranked = candidates
+    .map((property) => {
+      const secondary = `${property.neighborhood ?? ""} ${property.city ?? ""} ${property.address ?? ""}`;
+      return { property, ...matchScore(words, property.title ?? "", secondary, property.payload?.description ?? "") };
+    })
+    .filter((entry) => entry.hits === words.length && entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.property.reference.localeCompare(b.property.reference));
 
-  if (matches.length === 1) return { kind: "single", property: matches[0] };
-  if (matches.length > 1) return { kind: "ambiguous", properties: matches.slice(0, 3) };
-  return { kind: "none" };
+  if (!ranked.length) return { kind: "none" };
+  const bestScore = ranked[0].score;
+  const best = ranked.filter((entry) => entry.score === bestScore).map((entry) => entry.property);
+  if (best.length === 1) return { kind: "single", property: best[0] };
+  return { kind: "ambiguous", properties: best.slice(0, 5) };
 }
 
 export function propertyCaption(p: Property): string {
@@ -233,17 +325,15 @@ export async function listPropertyOptions(
   });
   const scored = (all ?? [])
     .map((p) => {
-      const haystack = normalizeWord(
-        `${p.title ?? ""} ${p.neighborhood ?? ""} ${p.city ?? ""} ${p.address ?? ""} ${p.payload?.description ?? ""}`,
-      );
-      const hits = wordsLower.filter((w) => haystack.includes(w)).length;
-      return { property: p, hits };
+      const secondary = `${p.neighborhood ?? ""} ${p.city ?? ""} ${p.address ?? ""}`;
+      const { score, hits } = matchScore(wordsLower, p.title ?? "", secondary, p.payload?.description ?? "");
+      return { property: p, score, hits };
     })
     .filter((entry) => entry.hits > 0);
 
   const full = scored.filter((entry) => entry.hits === wordsLower.length);
   return (full.length && !partialOk ? full : scored)
-    .sort((a, b) => b.hits - a.hits)
+    .sort((a, b) => b.score - a.score || b.hits - a.hits)
     .slice(0, 5)
     .map((entry) => entry.property);
 }
@@ -255,14 +345,16 @@ export function matchChoice(text: string, options: Property[]): Property[] {
 
   const scored = options
     .map((p) => {
-      const haystack = normalizeWord(`${p.title ?? ""} ${p.neighborhood ?? ""} ref ${p.reference}`);
-      const hits = words.filter((w) => haystack.includes(w)).length;
-      return { property: p, hits };
+      const secondary = `${p.neighborhood ?? ""} ${p.city ?? ""} ref ${p.reference}`;
+      const { score, hits } = matchScore(words, p.title ?? "", secondary);
+      return { property: p, score, hits };
     })
     .filter((entry) => entry.hits > 0);
 
   const full = scored.filter((entry) => entry.hits === words.length);
-  return (full.length ? full : scored).sort((a, b) => b.hits - a.hits).map((entry) => entry.property);
+  return (full.length ? full : scored)
+    .sort((a, b) => b.score - a.score || b.hits - a.hits)
+    .map((entry) => entry.property);
 }
 
 export function describeProperty(p: Property): string {
