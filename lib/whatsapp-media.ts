@@ -22,10 +22,12 @@ export type Property = {
   payload?: PropertyPayload | null;
 };
 
-const MEDIA_WORDS = /\b(fotos?|fotinhas?|imagens?|imgs?|pdf|arquivos?|materia(?:l|is)|flyers?|plantas?|prospectos?)\b/i;
+const MEDIA_WORDS = /\b(fotos?|fotinhas?|imagens?|imgs?|pdf|arquivos?|materia(?:l|is)|flyers?|folders?|plantas?|prospectos?)\b/i;
+const PROPERTY_DELIVERY_REQUEST = /\b(manda|mandar|envia|enviar|mostra|mostrar|passa|compartilha)\b/i;
+const PROPERTY_WITH_REQUEST = /\b(quero|preciso)\b[^?!.]{0,80}\b(im[óo]ve(?:l|is)|apartamentos?|aptos?|empreendimentos?)\b/i;
 
 export function detectMediaIntent(text: string): boolean {
-  return MEDIA_WORDS.test(text);
+  return MEDIA_WORDS.test(text) || PROPERTY_DELIVERY_REQUEST.test(text) || PROPERTY_WITH_REQUEST.test(text);
 }
 
 const AVAILABILITY_WORDS = /\b(tem|temos)\b[^?!.]{0,40}\b(no|na|nos|nas|em|pro|pra|dispon[ií]vel)\b/i;

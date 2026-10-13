@@ -36,6 +36,8 @@ describe("detectMediaIntent", () => {
     expect(detectMediaIntent("manda o material do Buriti")).toBe(true);
     expect(detectMediaIntent("quero ver as plantas do apto")).toBe(true);
     expect(detectMediaIntent("manda as imagens")).toBe(true);
+    expect(detectMediaIntent("me manda o Leonardo Da Vinci")).toBe(true);
+    expect(detectMediaIntent("quero o imóvel Leonardo Da Vinci")).toBe(true);
   });
 
   it("não detecta em perguntas comuns", () => {
