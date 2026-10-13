@@ -8,7 +8,8 @@ import MicButton from "../components/MicButton";
 
 type Agent = { id: string; name: string; persona: string };
 
-type Message = { role: "user" | "assistant"; text: string; fileName?: string; sources?: { text: string }[] };
+type ChatMedia = { type: "image" | "document"; url: string; caption?: string; fileName?: string };
+type Message = { role: "user" | "assistant"; text: string; fileName?: string; sources?: { text: string }[]; media?: ChatMedia[] };
 
 type Source = { id: string; title: string; status: string };
 
@@ -85,7 +86,7 @@ export default function ChatPage() {
     setLoading(false);
     setFile(null);
     setPreview(null);
-    setMessages((prev) => [...prev, { role: "assistant", text: data.answer || data.error || "Erro", sources: data.sources }]);
+    setMessages((prev) => [...prev, { role: "assistant", text: data.answer || data.error || "Erro", sources: data.sources, media: data.media }]);
   }
 
   async function trainFromChat() {
@@ -163,6 +164,22 @@ export default function ChatPage() {
               {messages.map((m, i) => (
                 <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "80%", background: m.role === "user" ? "var(--user-bg)" : "var(--assistant-bg)", padding: 16, borderRadius: 18, border: m.role === "user" ? "1px solid #ffd8b3" : "1px solid var(--line)", boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
                   <p style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--text)" }}>{m.text}</p>
+                  {m.media?.length ? (
+                    <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                      {m.media.map((item, mediaIndex) =>
+                        item.type === "image" ? (
+                          <a key={`${item.url}-${mediaIndex}`} href={item.url} target="_blank" rel="noreferrer">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={item.url} alt={item.caption || "Foto do imóvel"} style={{ width: "100%", maxWidth: 420, maxHeight: 280, objectFit: "cover", borderRadius: 10 }} />
+                          </a>
+                        ) : (
+                          <a key={`${item.url}-${mediaIndex}`} href={item.url} target="_blank" rel="noreferrer" download={item.fileName} className="button ghost" style={{ display: "block", textAlign: "left", overflowWrap: "anywhere" }}>
+                            Baixar PDF: {item.fileName || "Flyer do imóvel"}
+                          </a>
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                   {m.fileName && <p style={{ fontSize: ".75rem", color: "var(--muted)", margin: "6px 0 0" }}>Anexo: {m.fileName}</p>}
                 </div>
               ))}

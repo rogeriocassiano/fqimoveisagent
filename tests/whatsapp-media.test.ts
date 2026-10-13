@@ -107,8 +107,8 @@ describe("regionExpansion", () => {
   it("expande região para bairros", () => {
     const hoods = regionExpansion("tem apartamento na região do barreiro?");
     expect(hoods).toContain("barreiro");
-    expect(hoods).toContain("betania");
-    expect(hoods).toContain("caicara");
+    expect(hoods).toContain("milionarios");
+    expect(hoods).toContain("diamante");
   });
 
   it("expande região de duas palavras", () => {

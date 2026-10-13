@@ -30,6 +30,7 @@ function authorized(req: NextRequest) {
 
 type PendingChoice = { properties: Property[]; ts: number };
 const pendingChoices = new Map<string, PendingChoice>();
+const pendingMediaTargets = new Map<string, number>();
 const PENDING_TTL_MS = 5 * 60_000;
 
 const CAPABILITY_REPLY =
@@ -109,6 +110,20 @@ async function buildMediaResponse(text: string, agentId: string | null, pendingK
   }
 
   if (resolution.kind === "ambiguous") {
+    const titles = new Set(resolution.properties.map((p) => (p.title ?? "").toLowerCase().trim()));
+    if (titles.size === 1) {
+      const docs = await existingDocumentsMedia(searchWordsFor(text), agentId, "Flyer do empreendimento");
+      const images = resolution.properties.flatMap((p) =>
+        (p.payload?.photos ?? []).slice(0, 2).map((url) => ({ type: "image" as const, url, caption: propertyCaption(p) })),
+      );
+      const media = [...images, ...docs];
+      if (media.length) {
+        return {
+          reply: `${resolution.properties[0].title} tem ${resolution.properties.length} opções (${resolution.properties.map((p) => `Ref ${p.reference}`).join(", ")}). Mandei as fotos e os PDFs do empreendimento.`,
+          media,
+        };
+      }
+    }
     pendingChoices.set(pendingKey, { properties: resolution.properties, ts: Date.now() });
     return { reply: `Achei mais de um imóvel com esse nome:\n${formatPropertyList(resolution.properties)}\nQual deles você quer?` };
   }
@@ -211,6 +226,14 @@ export async function POST(req: NextRequest) {
 
     if (!text) return NextResponse.json({ reply: null });
 
+    const pendingMediaTs = pendingMediaTargets.get(pendingKey);
+    if (pendingMediaTs) {
+      pendingMediaTargets.delete(pendingKey);
+      if (Date.now() - pendingMediaTs < PENDING_TTL_MS && !detectMediaIntent(text)) {
+        return NextResponse.json(await buildMediaResponse(`manda o flyer e as fotos do ${text}`, agentId, pendingKey));
+      }
+    }
+
     const pending = pendingChoices.get(pendingKey);
     if (pending) {
       const expired = Date.now() - pending.ts >= PENDING_TTL_MS;
@@ -240,7 +263,9 @@ export async function POST(req: NextRequest) {
 
     if (detectMediaIntent(text)) {
       try {
-        return NextResponse.json(await buildMediaResponse(text, agentId, pendingKey));
+        const response = await buildMediaResponse(text, agentId, pendingKey);
+        if (!response.media?.length) pendingMediaTargets.set(pendingKey, Date.now());
+        return NextResponse.json(response);
       } catch (error) {
         console.error("wa_media_flow_failed", error instanceof Error ? error.message : "unknown");
       }

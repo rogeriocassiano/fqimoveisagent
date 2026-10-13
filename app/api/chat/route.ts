@@ -3,6 +3,16 @@ import { chatWithAgent, chatWithAllAgents } from "@/lib/agent";
 import { answerWithGemini } from "@/lib/gemini";
 import { extractTextFromFile } from "@/lib/extract";
 import { uploadFile } from "@/lib/storage";
+import {
+  detectAvailabilityIntent,
+  detectMediaIntent,
+  findExistingPdfDocuments,
+  listPropertyOptions,
+  propertyCaption,
+  resolvePropertyForMedia,
+  searchWordsFor,
+  type MediaItem,
+} from "@/lib/whatsapp-media";
 
 const textSchema = z.object({ message: z.string().trim().min(1).max(4000), agentId: z.string().optional() });
 
@@ -53,6 +63,36 @@ export async function POST(request: Request) {
     }
 
     const prompt = [message, extractedText && `Conteúdo do arquivo ${file?.name}:\n${extractedText}`].filter(Boolean).join("\n\n") || "Descreva o conteúdo enviado.";
+
+    if (!file && detectMediaIntent(message)) {
+      const words = searchWordsFor(message);
+      const docs = await findExistingPdfDocuments(words, agentId && agentId !== "all" ? agentId : null);
+      const resolution = await resolvePropertyForMedia(message);
+      const media: MediaItem[] = docs.map((doc) => ({
+        type: "document",
+        url: doc.path,
+        fileName: `${doc.title.replace(/[^a-zA-Z0-9À-ÿ._ -]/g, "_")}.pdf`,
+        mimetype: "application/pdf",
+        caption: "Flyer do imóvel",
+      }));
+      if (resolution.kind === "single") {
+        for (const url of resolution.property.payload?.photos?.slice(0, 6) ?? []) {
+          media.unshift({ type: "image", url, caption: propertyCaption(resolution.property) });
+        }
+      }
+      if (media.length) {
+        const name = resolution.kind === "single" ? resolution.property.title : words.join(" ");
+        return Response.json({ answer: `Encontrei o material de ${name || "imóvel"}. Os arquivos estão anexados abaixo.`, sources: [], media, fileUrl });
+      }
+    }
+
+    if (!file && detectAvailabilityIntent(message)) {
+      const options = await listPropertyOptions(searchWordsFor(message));
+      if (options.length) {
+        const answer = options.map((p) => `Ref ${p.reference} - ${p.title ?? "Imóvel"}${p.address ? ` - ${p.address}` : ""}`).join("\n");
+        return Response.json({ answer: `Encontrei ${options.length} opção(ões):\n\n${answer}\n\nPeça o flyer pelo nome ou pela referência.`, sources: [], media: [], fileUrl });
+      }
+    }
 
     if (agentId === "all") {
       const result = await chatWithAllAgents(prompt, parts);

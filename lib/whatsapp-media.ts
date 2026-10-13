@@ -54,6 +54,7 @@ const FILLER_WORDS = new Set(
     "que", "qual", "quais", "esse", "essa", "este", "esta", "aí", "ai", "lá", "la", "mim", "vocês", "voce", "você",
     "regiao", "região", "zona", "bairro", "area", "área", "tudo", "todos", "todas", "ver", "mostra", "mostre",
     "mostrar", "lista", "listar", "disponivel", "disponiveis", "disponível", "disponíveis", "gostaria",
+    "tem", "temos", "algum", "alguma", "alguns", "algumas", "opcao", "opções", "opcoes", "vocês", "voces",
   ].map(normalizeWord),
 );
 
@@ -67,7 +68,7 @@ export type MediaResolution =
 function candidateWords(text: string): string[] {
   const words = normalizeWord(text.replace(MEDIA_WORDS, " ").replace(/@\d+/g, " "))
     .split(/\W+/)
-    .filter((w) => w.length >= 4 && !FILLER_WORDS.has(w));
+    .filter((w) => w.length >= 2 && !FILLER_WORDS.has(w));
   return [...new Set(words)].slice(0, 3);
 }
 
@@ -194,11 +195,11 @@ export function propertyCaption(p: Property): string {
 
 /** Regiões administrativas de BH -> bairros (expande "tem apto na região do barreiro?"). */
 const BH_REGIONS: Record<string, string[]> = {
-  barreiro: ["barreiro", "betania", "caicara", "milionarios", "jardim das mansoes", "tirol", "petropolis", "diamante", "cardoso", "teixeira dias", "vale do jatoba"],
-  "centro sul": ["centro", "savassi", "lourdes", "funcionarios", "sion", "santo antonio", "cruzeiro", "carmo", "luxemburgo", "coracao eucaristico", "mangabeiras", "belvedere", "santa efigenia"],
+  barreiro: ["barreiro", "milionarios", "jardim das mansoes", "tirol", "petropolis", "diamante", "cardoso", "teixeira dias", "vale do jatoba"],
+  "centro sul": ["centro", "savassi", "lourdes", "funcionarios", "sion", "santo antonio", "cruzeiro", "carmo", "luxemburgo", "mangabeiras", "belvedere", "santa efigenia"],
   pampulha: ["pampulha", "ouro preto", "santa rosa", "castelo", "sao luis", "jaragua", "dona clara", "manacas", "liberdade", "paqueta"],
-  oeste: ["buritis", "estoril", "cabral", "salgado filho", "nova suissa", "joao pinheiro", "jardim america"],
-  noroeste: ["carlos prates", "padre eustaquio", "sao cristovao", "coqueiros", "esperanca", "dom joaquim"],
+  oeste: ["betania", "buritis", "estoril", "salgado filho", "nova suissa", "joao pinheiro", "jardim america", "cabana", "gameleira", "nova granada"],
+  noroeste: ["caicara", "alto caicaras", "carlos prates", "padre eustaquio", "sao cristovao", "coqueiros", "dom bosco", "gloria", "minas brasil"],
   "venda nova": ["venda nova", "ceu azul", "piratininga", "mantiqueira", "rio branco", "planalto", "serra verde", "jardim leblon"],
   nordeste: ["cidade nova", "uniao", "horto", "floresta", "santa tereza", "esplanada", "sao gabriel", "nazare", "concordia"],
   leste: ["taquaril", "santa cruz", "vera cruz", "saudade", "silveira", "vista alegre", "palmares"],

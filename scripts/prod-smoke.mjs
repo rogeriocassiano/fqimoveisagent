@@ -15,7 +15,8 @@ if (!SECRET) {
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = "") => {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? " — " + extra : ""}`);
-  cond ? pass++ : fail++;
+  if (cond) pass++;
+  else fail++;
 };
 
 async function send(text, { isGroup = false, participant = null, audio = null, audioMimetype = null } = {}) {
