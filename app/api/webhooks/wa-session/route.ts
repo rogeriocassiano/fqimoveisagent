@@ -400,6 +400,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Consulta ao CRM: só para números da equipe identificados no Bitrix ──
+    // Function calling: o modelo chama a API real do Bitrix conforme a pergunta.
+    // Precisa vir ANTES de mídia/disponibilidade: "cliente", "tarefa", "negócio"
+    // podem aparecer em frases que casam com intents de imóvel.
+    if (staff && detectCrmQueryIntent(text)) {
+      try {
+        const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
+        const reply = await answerWithBitrixTools(text, staff);
+        if (reply) return waRespond(body, { reply });
+      } catch (error) {
+        console.error("wa_crm_tools_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
+
     if (detectAvailabilityIntent(text)) {
       try {
         return waRespond(body, await buildAvailabilityResponse(text, agentId, pendingKey));
@@ -415,18 +429,6 @@ export async function POST(req: NextRequest) {
         return waRespond(body, response);
       } catch (error) {
         console.error("wa_media_flow_failed", error instanceof Error ? error.message : "unknown");
-      }
-    }
-
-    // ── Consulta ao CRM: só para números da equipe identificados no Bitrix ──
-    // Function calling: o modelo chama a API real do Bitrix conforme a pergunta.
-    if (staff && detectCrmQueryIntent(text)) {
-      try {
-        const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
-        const reply = await answerWithBitrixTools(text, staff);
-        if (reply) return waRespond(body, { reply });
-      } catch (error) {
-        console.error("wa_crm_tools_failed", error instanceof Error ? error.message : "unknown");
       }
     }
 
