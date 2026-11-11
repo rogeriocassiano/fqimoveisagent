@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { genaiClient } from "./genai-client";
 import { serverEnv } from "./env";
 
 const B24_TIMEOUT_MS = 15_000;
@@ -285,12 +285,21 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
 
   // Resolve a pessoa citada primeiro: se a pergunta é sobre alguém específico,
   // não despejamos a lista global — respondemos só sobre ela.
-  const nameProbe = text.match(/(?:d[oea]?|para|dele|dela|com|sobre)\s+([A-Za-zÀ-ú]{3,}(?:\s[A-Za-zÀ-ú]{3,})?)/);
-  // Remove palavras-ruído que podem grudar no nome ("do cliente valquíria" → "valquíria")
-  const probeName = nameProbe?.[1].replace(/^(?:(?:o|a|um|uma|cliente|lead|corretor(?:a)?|usu[áa]ri[oa]|funcion[áa]ri[oa])\s+)+/i, "").trim() ?? "";
+  const nameProbe =
+    text.match(/\b(?:d[oea]?|para|pro|pra|dele|dela|com|sobre|vendedor(?:a)?|corretor(?:a)?|chamad[oa])\s+([A-Za-zÀ-ú]{2,}(?:\s+[A-Za-zÀ-ú]{2,}){0,3})/) ??
+    text.match(/(?:^|\s)[oa]\s+([A-ZÀ-Ú][a-zà-ú]{2,}(?:\s+[A-ZÀ-Ú][a-zà-ú]{2,})?)/);
+  // Remove palavras-ruído que podem grudar no nome ("da aline" → "aline", "do cliente valquíria" → "valquíria")
+  const probeName = nameProbe?.[1].replace(/^(?:(?:o|a|um|uma|de|do|da|dos|das|no|na|em|para|pro|pra|com|cliente|lead|corretor(?:a)?|vendedor(?:a)?|usu[áa]ri[oa]|funcion[áa]ri[oa])\s+)+/i, "").trim() ?? "";
   const aboutCrm = /tarefa|visita|cliente|contato|lead|neg[óo]cio|pendente|crm|bitrix|agenda|prazo/i.test(text);
-  const candidates = probeName && aboutCrm ? await staffCandidates(probeName).catch(() => []) : [];
-  const query = norm(probeName);
+  let candidates = probeName && aboutCrm ? await staffCandidates(probeName).catch(() => []) : [];
+  // Se o nome capturado pegou palavra a mais ("Tiago tem tarefa" → "Tiago tem"),
+  // tenta de novo só com o primeiro nome.
+  let effectiveName = probeName;
+  if (!candidates.length && probeName.includes(" ")) {
+    effectiveName = probeName.split(" ")[0];
+    candidates = aboutCrm ? await staffCandidates(effectiveName).catch(() => []) : [];
+  }
+  const query = norm(effectiveName);
   const target = candidates.find((c) => norm(c.name) === query) ?? (candidates.length === 1 ? candidates[0] : null);
   const ambiguous = candidates.length > 1 && !target;
 
@@ -314,34 +323,34 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
     const tasks = await queryTasks({ responsibleId: target.bitrixId, deadlineBefore: overdue ? now : undefined, onlyClosed: closed });
     sections.push(`Tarefas ${closed ? "concluídas" : overdue ? "atrasadas" : "abertas"} de ${target.name}:\n${await taskLines(tasks)}`);
   } else if (ambiguous) {
-    sections.push(`Encontrei mais de uma pessoa chamada "${probeName}" na equipe — especifique:\n${candidates.map((c) => `- ${c.name}`).join("\n")}`);
+    sections.push(`Encontrei mais de uma pessoa chamada "${effectiveName}" na equipe — especifique:\n${candidates.map((c) => `- ${c.name}`).join("\n")}`);
   }
 
 
 
-  if (probeName && aboutCrm && !target && !ambiguous) {
+  if (effectiveName && aboutCrm && !target && !ambiguous) {
     // "Ache tudo": para nomes que não são funcionários, busca em tarefas, negócios, leads e contatos.
     const [tasks, deals, leads, contacts] = await Promise.all([
       b24Call<{ tasks?: B24Task[] } | B24Task[]>("tasks.task.list", {
-        filter: { "%TITLE": probeName },
+        filter: { "%TITLE": effectiveName },
         select: ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID", "STATUS"],
         order: { DEADLINE: "desc" },
         start: 0,
       }).catch(() => null),
       b24Call<{ ID: string; TITLE: string; STAGE_ID: string; OPPORTUNITY?: string }[]>("crm.deal.list", {
-        filter: { "%TITLE": probeName },
+        filter: { "%TITLE": effectiveName },
         select: ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY"],
         order: { DATE_MODIFY: "desc" },
         start: 0,
       }).catch(() => []),
       b24Call<{ ID: string; NAME?: string; LAST_NAME?: string; PHONE?: { VALUE: string }[] }[]>("crm.lead.list", {
-        filter: { "%NAME": probeName },
+        filter: { "%NAME": effectiveName },
         select: ["ID", "NAME", "LAST_NAME", "PHONE"],
         order: { DATE_MODIFY: "desc" },
         start: 0,
       }).catch(() => []),
       b24Call<{ ID: string; NAME?: string; LAST_NAME?: string; PHONE?: { VALUE: string }[] }[]>("crm.contact.list", {
-        filter: { "%NAME": probeName },
+        filter: { "%NAME": effectiveName },
         select: ["ID", "NAME", "LAST_NAME", "PHONE"],
         order: { DATE_MODIFY: "desc" },
         start: 0,
@@ -351,21 +360,21 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
     const taskList = (Array.isArray(tasks) ? tasks : (tasks?.tasks ?? [])).filter(
       (t) => CLOSED_STATUSES.has(Number(t.status ?? t.STATUS ?? 0)) === closed,
     );
-    if (taskList.length) sections.push(`Tarefas ${closed ? "concluídas" : "abertas"} que mencionam "${probeName}":\n${await taskLines(taskList.slice(0, 10))}`);
+    if (taskList.length) sections.push(`Tarefas ${closed ? "concluídas" : "abertas"} que mencionam "${effectiveName}":\n${await taskLines(taskList.slice(0, 10))}`);
     const stages = await stageMap();
     if (deals?.length) {
-      sections.push(`Negócios no CRM que mencionam "${probeName}":\n${deals.slice(0, 10).map((d) => `- #${d.ID} ${d.TITLE} (${stages[d.STAGE_ID] ?? d.STAGE_ID})`).join("\n")}`);
+      sections.push(`Negócios no CRM que mencionam "${effectiveName}":\n${deals.slice(0, 10).map((d) => `- #${d.ID} ${d.TITLE} (${stages[d.STAGE_ID] ?? d.STAGE_ID})`).join("\n")}`);
     }
 
     const leadList = [...(leads ?? []), ...(await b24Call<typeof leads>("crm.lead.list", {
-      filter: { "%LAST_NAME": probeName },
+      filter: { "%LAST_NAME": effectiveName },
       select: ["ID", "NAME", "LAST_NAME", "PHONE"],
       order: { DATE_MODIFY: "desc" },
       start: 0,
     }).catch(() => []))];
     if (leadList.length) {
       sections.push(
-        `Leads no CRM que mencionam "${probeName}":\n${leadList
+        `Leads no CRM que mencionam "${effectiveName}":\n${leadList
           .slice(0, 10)
           .map((c) => `- #${c.ID} ${[c.NAME, c.LAST_NAME].filter(Boolean).join(" ").replace(/\s+/g, " ")}${c.PHONE?.[0]?.VALUE ? ` (${c.PHONE[0].VALUE})` : ""}`)
           .join("\n")}`,
@@ -373,14 +382,14 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
     }
 
     const contactList = [...(contacts ?? []), ...(await b24Call<typeof contacts>("crm.contact.list", {
-      filter: { "%LAST_NAME": probeName },
+      filter: { "%LAST_NAME": effectiveName },
       select: ["ID", "NAME", "LAST_NAME", "PHONE"],
       order: { DATE_MODIFY: "desc" },
       start: 0,
     }).catch(() => []))];
     if (contactList.length) {
       sections.push(
-        `Contatos no CRM que mencionam "${probeName}":\n${contactList
+        `Contatos no CRM que mencionam "${effectiveName}":\n${contactList
           .slice(0, 10)
           .map((c) => `- #${c.ID} ${[c.NAME, c.LAST_NAME].filter(Boolean).join(" ").replace(/\s+/g, " ")}${c.PHONE?.[0]?.VALUE ? ` (${c.PHONE[0].VALUE})` : ""}`)
           .join("\n")}`,
@@ -447,7 +456,7 @@ Regras:
 
 export async function extractStaffAction(text: string): Promise<StaffAction | null> {
   const env = serverEnv();
-  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const ai = genaiClient();
   const today = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   const response = await ai.models.generateContent({
     model: env.GEMINI_MODEL,
