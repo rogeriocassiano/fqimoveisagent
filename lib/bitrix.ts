@@ -314,14 +314,14 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
     sections.push(`Tarefas/visitas com prazo ${week ? "nesta semana" : "até amanhã"}:\n${await taskLines(tasks)}`);
   }
 
-  if (staff && /minhas\s+tarefas|minhas\s+visitas/i.test(text)) {
-    const tasks = await queryTasks({ responsibleId: staff.bitrixId, onlyClosed: closed });
-    sections.push(`Tarefas ${closed ? "concluídas" : "abertas"} de ${staff.name}:\n${await taskLines(tasks)}`);
+  if (staff && /minha|eu\s+tenho|pra\s+mim|comigo|minhas|meu|eu\b/i.test(text) && !target) {
+    const all = await queryTasks({ responsibleId: staff.bitrixId, onlyClosed: closed }, 500);
+    sections.push(`Tarefas ${closed ? "concluídas" : "abertas"} de ${staff.name} (total ${all.length}${all.length >= 500 ? "+" : ""}):\n${await taskLines(all.slice(0, 40))}`);
   }
 
   if (target) {
-    const tasks = await queryTasks({ responsibleId: target.bitrixId, deadlineBefore: overdue ? now : undefined, onlyClosed: closed });
-    sections.push(`Tarefas ${closed ? "concluídas" : overdue ? "atrasadas" : "abertas"} de ${target.name}:\n${await taskLines(tasks)}`);
+    const all = await queryTasks({ responsibleId: target.bitrixId, deadlineBefore: overdue ? now : undefined, onlyClosed: closed }, 500);
+    sections.push(`Tarefas ${closed ? "concluídas" : overdue ? "atrasadas" : "abertas"} de ${target.name} (total ${all.length}${all.length >= 500 ? "+" : ""}):\n${await taskLines(all.slice(0, 40))}`);
   } else if (ambiguous) {
     sections.push(`Encontrei mais de uma pessoa chamada "${effectiveName}" na equipe — especifique:\n${candidates.map((c) => `- ${c.name}`).join("\n")}`);
   }

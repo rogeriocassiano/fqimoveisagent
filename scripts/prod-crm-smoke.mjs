@@ -72,7 +72,7 @@ console.log(`   Tiago: ${tasksOf(TIAGO.id).length} | Polly: ${tasksOf(POLLY.id).
 // 1. próprias tarefas (staff identificado pelo telefone)
 let r = await ask("quantas tarefas eu tenho abertas?", { from: TIAGO.phone });
 console.log(`  >> ${(r.reply ?? "").slice(0, 300)}\n`);
-ok("Tiago pergunta próprias tarefas -> menciona tarefas", /tarefa/i.test(r.reply ?? ""), (r.reply ?? "").split("\n")[0]);
+ok("Tiago pergunta próprias tarefas -> lista tarefas reais", /#\d+|tarefa/i.test(r.reply ?? "") && !/não tenho acesso/i.test(r.reply ?? ""), (r.reply ?? "").split("\n")[0]);
 
 // 2. tarefa de outro corretor
 r = await ask("o vendedor Tiago tem tarefa?", { from: POLLY.phone });
