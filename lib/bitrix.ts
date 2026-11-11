@@ -19,6 +19,8 @@ export type StaffMember = { bitrixId: number; name: string };
 
 let usersCache: { users: B24User[]; ts: number } | null = null;
 let stagesCache: { map: Record<string, string>; ts: number } | null = null;
+const TASKS_CACHE_TTL_MS = 60_000;
+const tasksCache = new Map<string, { tasks: B24Task[]; ts: number }>();
 
 function norm(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -191,29 +193,37 @@ export async function queryTasks(input: { responsibleId?: number; deadlineBefore
   const filter: Record<string, unknown> = { "!STATUS": 5 };
   if (input.responsibleId) filter.RESPONSIBLE_ID = input.responsibleId;
 
-  const all: B24Task[] = [];
-  // Páginas em paralelo (4 por vez) — o Bitrix pagina de 50 em 50 e a latência
-  // sequencial estourava o timeout da function no Netlify.
-  for (let start = 0; start < 500; start += 200) {
-    const pages = await Promise.all(
-      [0, 1, 2, 3].map((i) =>
-        b24Call<{ tasks?: B24Task[] } | B24Task[]>("tasks.task.list", {
-          filter,
-          select: ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID", "STATUS"],
-          order: { DEADLINE: "asc" },
-          start: start + i * 50,
-        }).catch(() => null),
-      ),
-    );
-    let exhausted = false;
-    for (const result of pages) {
-      const tasks = Array.isArray(result) ? result : (result?.tasks ?? []);
-      all.push(...tasks);
-      // Lista vem ordenada por deadline crescente: ao passar do limite, o resto não interessa.
-      if (input.deadlineBefore && tasks.some((t) => { const d = t.deadline ?? t.DEADLINE; return d && new Date(d).getTime() >= input.deadlineBefore!.getTime(); })) { exhausted = true; break; }
-      if (tasks.length < 50) { exhausted = true; break; }
+  const cacheKey = JSON.stringify(filter);
+  const hit = tasksCache.get(cacheKey);
+  let all: B24Task[];
+  if (hit && Date.now() - hit.ts < TASKS_CACHE_TTL_MS) {
+    all = hit.tasks;
+  } else {
+    all = [];
+    // Páginas em paralelo (4 por vez) — o Bitrix pagina de 50 em 50 e a latência
+    // sequencial estourava o timeout da function no Netlify.
+    for (let start = 0; start < 500; start += 200) {
+      const pages = await Promise.all(
+        [0, 1, 2, 3].map((i) =>
+          b24Call<{ tasks?: B24Task[] } | B24Task[]>("tasks.task.list", {
+            filter,
+            select: ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID", "STATUS"],
+            order: { DEADLINE: "asc" },
+            start: start + i * 50,
+          }).catch(() => null),
+        ),
+      );
+      let exhausted = false;
+      for (const result of pages) {
+        const tasks = Array.isArray(result) ? result : (result?.tasks ?? []);
+        all.push(...tasks);
+        // Lista vem ordenada por deadline crescente: ao passar do limite, o resto não interessa.
+        if (input.deadlineBefore && tasks.some((t) => { const d = t.deadline ?? t.DEADLINE; return d && new Date(d).getTime() >= input.deadlineBefore!.getTime(); })) { exhausted = true; break; }
+        if (tasks.length < 50) { exhausted = true; break; }
+      }
+      if (exhausted) break;
     }
-    if (exhausted) break;
+    tasksCache.set(cacheKey, { tasks: all, ts: Date.now() });
   }
 
   return all
