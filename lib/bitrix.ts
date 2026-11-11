@@ -304,14 +304,14 @@ export async function buildCrmContext(text: string, staff: StaffMember | null): 
   const ambiguous = candidates.length > 1 && !target;
 
   if (overdue && !target && !ambiguous) {
-    const tasks = await queryTasks({ deadlineBefore: now });
-    sections.push(`Tarefas ATRASADAS no Bitrix, agrupadas por responsável:\n${await taskLinesGrouped(tasks)}`);
+    const all = await queryTasks({ deadlineBefore: now }, 500);
+    sections.push(`Tarefas ATRASADAS no Bitrix (total ${all.length}${all.length >= 500 ? "+" : ""}), agrupadas por responsável:\n${await taskLinesGrouped(all.slice(0, 40))}`);
   }
 
   if (upcoming && !target && !ambiguous) {
     const horizon = new Date(now.getTime() + (week ? 7 : 2) * 24 * 60 * 60 * 1000);
-    const tasks = await queryTasks({ deadlineAfter: now, deadlineBefore: horizon });
-    sections.push(`Tarefas/visitas com prazo ${week ? "nesta semana" : "até amanhã"}:\n${await taskLines(tasks)}`);
+    const all = await queryTasks({ deadlineAfter: now, deadlineBefore: horizon }, 500);
+    sections.push(`Tarefas/visitas com prazo ${week ? "nesta semana" : "até amanhã"} (total ${all.length}):\n${await taskLines(all.slice(0, 40))}`);
   }
 
   if (staff && /minha|eu\s+tenho|pra\s+mim|comigo|minhas|meu|eu\b/i.test(text) && !target) {
