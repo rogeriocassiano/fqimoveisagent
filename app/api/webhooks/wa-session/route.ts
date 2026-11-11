@@ -227,6 +227,9 @@ async function waRespond(body: { audio?: string | null }, payload: { reply?: str
   return NextResponse.json(payload);
 }
 
+// O agente CRM faz várias chamadas (Gemini tools + Bitrix) — precisa de mais tempo.
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

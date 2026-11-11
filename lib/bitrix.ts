@@ -209,6 +209,8 @@ export async function queryTasks(input: { responsibleId?: number; deadlineBefore
     for (const result of pages) {
       const tasks = Array.isArray(result) ? result : (result?.tasks ?? []);
       all.push(...tasks);
+      // Lista vem ordenada por deadline crescente: ao passar do limite, o resto não interessa.
+      if (input.deadlineBefore && tasks.some((t) => { const d = t.deadline ?? t.DEADLINE; return d && new Date(d).getTime() >= input.deadlineBefore!.getTime(); })) { exhausted = true; break; }
       if (tasks.length < 50) { exhausted = true; break; }
     }
     if (exhausted) break;
