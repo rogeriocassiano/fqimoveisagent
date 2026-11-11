@@ -1,9 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import { genaiClient } from "./genai-client";
 import { serverEnv } from "./env";
 
 export async function embedText(text: string): Promise<number[]> {
   const env = serverEnv();
-  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const ai = genaiClient();
   const response = await ai.models.embedContent({
     model: env.GEMINI_EMBEDDING_MODEL,
     contents: [text],

@@ -1,4 +1,6 @@
 import { chatWithAgent } from "@/lib/agent";
+import { getSessionUser } from "@/lib/auth";
+import { buildCrmContext, detectCrmQueryIntent, findStaffByName } from "@/lib/bitrix";
 import { extractTextFromFile } from "@/lib/extract";
 import { uploadFile } from "@/lib/storage";
 import { NextRequest } from "next/server";
@@ -46,7 +48,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const prompt = [message, extractedText && `Conteúdo do arquivo ${file?.name}:\n${extractedText}`].filter(Boolean).join("\n\n") || "Descreva o conteúdo enviado.";
-    const result = await chatWithAgent(id, prompt, parts);
+
+    let crmContext: string | undefined;
+    if (detectCrmQueryIntent(message)) {
+      try {
+        const session = await getSessionUser(request);
+        if (session) {
+          const staff = session.name ? await findStaffByName(session.name).catch(() => null) : null;
+          crmContext = (await buildCrmContext(message, staff)) ?? undefined;
+        }
+      } catch (error) {
+        console.error("crm_context_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
+
+    const result = await chatWithAgent(id, prompt, parts, "chat-user", crmContext);
     return Response.json({ ...result, fileUrl });
   } catch (error) {
     console.error("chat_agent_failed", error instanceof Error ? error.message : "unknown");

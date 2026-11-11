@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { genaiClient } from "./genai-client";
 import { serverEnv } from "./env";
 
 const DEFAULT_INSTRUCTION = `Você é o SR. Queiroz, assistente de IA da FQ Imóveis.
@@ -23,7 +23,7 @@ export type GeminiPart = { text: string } | { inlineData: { mimeType: string; da
 
 export async function answerWithGemini(message: string, context = "", systemInstruction?: string, parts?: GeminiPart[]) {
   const env = serverEnv();
-  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const ai = genaiClient();
   const text = `${context ? `Contexto confiável:\n${context}\n\n` : ""}Pergunta: ${message}`;
   const contents: GeminiPart[] = [{ text }];
   if (parts) contents.push(...parts);

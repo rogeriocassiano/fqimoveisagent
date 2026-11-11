@@ -246,7 +246,7 @@ async function buildChatContext(message: string, agentId?: string) {
   return { context, matches: allMatches };
 }
 
-export async function chatWithAgent(agentId: string, message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user") {
+export async function chatWithAgent(agentId: string, message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user", extraContext?: string) {
   const db = adminDb();
   const { data: agent, error } = await db.from("agents").select("*, agent_versions(system_prompt)").eq("id", agentId).single();
   if (error || !agent) throw error ?? new Error("Agente não encontrado");
@@ -256,8 +256,9 @@ export async function chatWithAgent(agentId: string, message: string, parts?: { 
   const persona = (agent as { persona?: string }).persona ?? "";
 
   const { context, matches } = await buildChatContext(message, agentId);
+  const fullContext = extraContext ? `${context}\n\nDados em tempo real do CRM (Bitrix24):\n${extraContext}` : context;
 
-  const prompt = buildFinalPrompt(message, tone, persona, context);
+  const prompt = buildFinalPrompt(message, tone, persona, fullContext);
   const answer = await answerWithGemini(message, prompt, systemPrompt, parts);
 
   const { data: conversation } = await db
@@ -275,7 +276,7 @@ export async function chatWithAgent(agentId: string, message: string, parts?: { 
   return { answer, sources: matches };
 }
 
-export async function chatWithAllAgents(message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user") {
+export async function chatWithAllAgents(message: string, parts?: { inlineData: { mimeType: string; data: string } }[], contactId = "chat-user", extraContext?: string) {
   const db = adminDb();
   const { data: agents } = await db.from("agents").select("*, agent_versions(system_prompt)").order("created_at", { ascending: false });
   const systemPrompts = (agents ?? []).map((a) => (a as { agent_versions?: { system_prompt?: string }[] }).agent_versions?.[0]?.system_prompt ?? "").filter(Boolean).join("\n---\n");
@@ -283,8 +284,9 @@ export async function chatWithAllAgents(message: string, parts?: { inlineData: {
   const persona = "corretor geral da FQ Imóveis, acessa todo o conhecimento treinado de todos os agentes";
 
   const { context, matches } = await buildChatContext(message);
+  const fullContext = extraContext ? `${context}\n\nDados em tempo real do CRM (Bitrix24):\n${extraContext}` : context;
 
-  const prompt = buildFinalPrompt(message, tone, persona, context);
+  const prompt = buildFinalPrompt(message, tone, persona, fullContext);
   const combinedSystemPrompt = `Você é o SR. Queiroz, um assistente geral da FQ Imóveis que combina o conhecimento de todos os agentes treinados.\n\n${systemPrompts}`;
   const answer = await answerWithGemini(message, prompt, combinedSystemPrompt, parts);
 

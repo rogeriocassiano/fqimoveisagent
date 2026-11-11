@@ -1,7 +1,17 @@
 import { adminDb } from "./supabase";
 import { searchProperties } from "./properties";
 
-export type MediaItem = { type: "image" | "document"; url: string; caption?: string; fileName?: string; mimetype?: string };
+export type MediaItem = {
+  type: "image" | "document" | "audio";
+  url?: string;
+  /** Base64 — para mídia gerada em memória (ex.: TTS). */
+  data?: string;
+  caption?: string;
+  fileName?: string;
+  mimetype?: string;
+  /** true = nota de voz (PTT), false = arquivo de áudio comum. */
+  ptt?: boolean;
+};
 
 export type PropertyPayload = { photos?: string[]; description?: string; unit_features?: string; building_features?: string };
 
@@ -170,7 +180,7 @@ function isSendableDocumentUri(uri: string): boolean {
   return uri.startsWith("http") || uri.toLowerCase().endsWith(".pdf");
 }
 
-export async function findExistingPdfDocuments(words: string[], agentId?: string | null): Promise<ExistingDocument[]> {
+export async function findExistingPdfDocuments(words: string[], agentId?: string | null, limit = 3): Promise<ExistingDocument[]> {
   const wordsLower = [...new Set(words.map(normalizeWord).filter(Boolean))].slice(0, 4);
   if (!wordsLower.length) return [];
 
@@ -230,9 +240,30 @@ export async function findExistingPdfDocuments(words: string[], agentId?: string
 
   if (agentId) {
     const own = ranked.filter((entry) => entry.doc.agent_id === agentId);
-    if (own.length) return own.slice(0, 3).map(toExistingDocument);
+    if (own.length) return own.slice(0, limit).map(toExistingDocument);
   }
-  return ranked.slice(0, 3).map(toExistingDocument);
+  return ranked.slice(0, limit).map(toExistingDocument);
+}
+
+/** Corretor escolhe entre documentos listados: número ("o 2"), "todos" ou trecho do título. */
+export function matchDocumentChoice(text: string, docs: ExistingDocument[]): ExistingDocument[] {
+  const norm = normalizeWord(text);
+  if (/\btodos?\b|\btodas\b/.test(norm)) return docs;
+  const indexMatch = norm.match(/\b(\d{1,2})\b/);
+  if (indexMatch) {
+    const index = parseInt(indexMatch[1], 10) - 1;
+    if (index >= 0 && index < docs.length) return [docs[index]];
+  }
+  const words = [...new Set(norm.split(/\W+/).filter((w) => w.length >= 2 && !FILLER_WORDS.has(w)))].slice(0, 4);
+  if (!words.length) return [];
+  const scored = docs
+    .map((doc) => ({ doc, ...matchScore(words, doc.title) }))
+    .filter((entry) => entry.hits > 0);
+  if (!scored.length) return [];
+  const full = scored.filter((entry) => entry.hits === words.length);
+  const best = full.length ? full : scored;
+  const topScore = Math.max(...best.map((entry) => entry.score));
+  return best.filter((entry) => entry.score >= topScore * 0.8).map((entry) => entry.doc);
 }
 
 function toExistingDocument(entry: { doc: { id: string; title: string | null; uri: string | null } }): ExistingDocument {

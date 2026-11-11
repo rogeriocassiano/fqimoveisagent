@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { chatWithAgent, chatWithAllAgents } from "@/lib/agent";
+import { getSessionUser } from "@/lib/auth";
+import { buildCrmContext, detectCrmQueryIntent, findStaffByName } from "@/lib/bitrix";
 import { answerWithGemini } from "@/lib/gemini";
 import { extractTextFromFile } from "@/lib/extract";
 import { uploadFile } from "@/lib/storage";
@@ -94,13 +96,27 @@ export async function POST(request: Request) {
       }
     }
 
+    // Perguntas de CRM só recebem dados do Bitrix para usuários autenticados.
+    let crmContext: string | undefined;
+    if (detectCrmQueryIntent(message)) {
+      try {
+        const session = await getSessionUser(request);
+        if (session) {
+          const staff = session.name ? await findStaffByName(session.name).catch(() => null) : null;
+          crmContext = (await buildCrmContext(message, staff)) ?? undefined;
+        }
+      } catch (error) {
+        console.error("crm_context_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
+
     if (agentId === "all") {
-      const result = await chatWithAllAgents(prompt, parts);
+      const result = await chatWithAllAgents(prompt, parts, "chat-user", crmContext);
       return Response.json({ ...result, fileUrl });
     }
 
     if (agentId) {
-      const result = await chatWithAgent(agentId, prompt, parts);
+      const result = await chatWithAgent(agentId, prompt, parts, "chat-user", crmContext);
       return Response.json({ ...result, fileUrl });
     }
 

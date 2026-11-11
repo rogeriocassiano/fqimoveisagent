@@ -46,25 +46,42 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Property | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => { const token = document.cookie.match(/sb-access-token=([^;]+)/)?.[1]; if (!token) router.push("/login"); }, [router]);
-  useEffect(() => { fetch("/api/properties").then((r) => r.json()).then((d) => setProperties(d.properties ?? [])); }, []);
+  useEffect(() => {
+    fetch("/api/properties").then((r) => r.json()).then((d) => {
+      const list = d.properties ?? [];
+      setProperties(list);
+      const editId = new URLSearchParams(window.location.search).get("edit");
+      const property = editId ? list.find((item: Property) => item.id === editId) : null;
+      if (property) editProperty(property);
+    });
+  }, []);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     const body = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v === "" ? undefined : v]));
     const photos = form.photos.split("\n").map((u) => u.trim()).filter(Boolean);
-    const payload = photos.length ? { photos } : undefined;
-    const res = await fetch("/api/properties", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, payload }) });
+    const payload = photos.length ? { photos } : {};
+    const res = await fetch("/api/properties", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, id: editingId ?? undefined, payload }) });
     const data = await res.json();
     setLoading(false);
     if (res.ok) {
-      setProperties([data.property, ...properties]);
+      setProperties(editingId ? properties.map((property) => property.id === editingId ? data.property : property) : [data.property, ...properties]);
+      setEditingId(null);
       setForm({ reference: "", title: "", type: "apartamento", city: "Belo Horizonte", neighborhood: "", address: "", bedrooms: "", suites: "", bathrooms: "", parking_spaces: "", area: "", sale_price: "", url: "", status: "available", photos: "" });
     } else {
-      alert(data.error || "Erro ao salvar");
+      alert(typeof data.error === "string" ? data.error : "Erro ao salvar");
     }
+  }
+
+  function editProperty(property: Property) {
+    setEditingId(property.id);
+    setForm({ reference: property.reference ?? "", title: property.title ?? "", type: property.type ?? "apartamento", city: property.city ?? "Belo Horizonte", neighborhood: property.neighborhood ?? "", address: property.address ?? "", bedrooms: String(property.bedrooms ?? ""), suites: String(property.suites ?? ""), bathrooms: String(property.bathrooms ?? ""), parking_spaces: String(property.parking_spaces ?? ""), area: String(property.area ?? ""), sale_price: String(property.sale_price ?? ""), url: property.url ?? "", status: "available", photos: property.payload?.photos?.join("\n") ?? "" });
+    setSelected(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
@@ -79,7 +96,7 @@ export default function PropertiesPage() {
       </div>
 
       <section className="card" style={{ marginBottom: 32 }}>
-        <h2 style={{ margin: "0 0 16px" }}>Novo apartamento</h2>
+        <h2 style={{ margin: "0 0 16px" }}>{editingId ? "Editar imóvel" : "Novo imóvel"}</h2>
         <form onSubmit={save} style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
             <input placeholder="Referência (código)" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} required />
@@ -95,7 +112,10 @@ export default function PropertiesPage() {
             <input placeholder="URL do anúncio" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           </div>
           <textarea placeholder="Fotos (uma URL por linha)" value={form.photos} onChange={(e) => setForm({ ...form, photos: e.target.value })} rows={3} />
-          <button type="submit" disabled={loading}>{loading ? "Salvando..." : "Salvar apartamento"}</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="submit" disabled={loading}>{loading ? "Salvando..." : editingId ? "Salvar alterações" : "Adicionar imóvel"}</button>
+            {editingId && <button type="button" className="ghost" onClick={() => { setEditingId(null); setForm({ reference: "", title: "", type: "apartamento", city: "Belo Horizonte", neighborhood: "", address: "", bedrooms: "", suites: "", bathrooms: "", parking_spaces: "", area: "", sale_price: "", url: "", status: "available", photos: "" }); }}>Cancelar edição</button>}
+          </div>
         </form>
       </section>
 
@@ -132,7 +152,10 @@ export default function PropertiesPage() {
             <p style={{ color: "var(--muted)", margin: "16px 0" }}>{selected.payload?.description}</p>
             {selected.payload?.unit_features && <p style={{ color: "var(--muted)", margin: "8px 0" }}><strong>Unidade:</strong> {selected.payload.unit_features}</p>}
             {selected.payload?.building_features && <p style={{ color: "var(--muted)", margin: "8px 0" }}><strong>Empreendimento:</strong> {selected.payload.building_features}</p>}
-            <a href={selected.url} target="_blank" rel="noreferrer" className="button ghost">Ver anúncio no site</a>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => editProperty(selected)}>Editar imóvel</button>
+              {selected.url && <a href={selected.url} target="_blank" rel="noreferrer" className="button ghost">Ver anúncio no site</a>}
+            </div>
           </div>
         </div>
       )}

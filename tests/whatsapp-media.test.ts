@@ -7,6 +7,7 @@ import {
   isCapabilityQuestion,
   listPropertyOptions,
   matchChoice,
+  matchDocumentChoice,
   propertyCaption,
   regionExpansion,
   resolvePropertyForMedia,
@@ -143,6 +144,40 @@ describe("matchChoice", () => {
 
   it("não força escolha quando a resposta não casa com nada", () => {
     expect(matchChoice("outro assunto qualquer", options)).toHaveLength(0);
+  });
+});
+
+describe("matchDocumentChoice", () => {
+  const docs = [
+    { id: "1", title: "BOOK Exclusive Safira", path: "https://a" },
+    { id: "2", title: "CT TERNA Safira - Safira - Folder digital", path: "https://b" },
+    { id: "3", title: "Residencial Safira - Marketing (2)", path: "https://c" },
+    { id: "4", title: "000 Tabelas - Monte Safira", path: "https://d" },
+  ];
+
+  it("'todos' retorna todos os documentos", () => {
+    expect(matchDocumentChoice("manda todos", docs)).toHaveLength(4);
+  });
+
+  it("número escolhe pela posição da lista", () => {
+    const picked = matchDocumentChoice("o 2", docs);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].title).toBe("CT TERNA Safira - Safira - Folder digital");
+  });
+
+  it("trecho do título escolhe o documento certo", () => {
+    const picked = matchDocumentChoice("o folder digital", docs);
+    expect(picked.map((d) => d.title)).toContain("CT TERNA Safira - Safira - Folder digital");
+  });
+
+  it("'exclusive' diferencia do Residencial Safira", () => {
+    const picked = matchDocumentChoice("o exclusive", docs);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].title).toBe("BOOK Exclusive Safira");
+  });
+
+  it("resposta sem relação não escolhe nada", () => {
+    expect(matchDocumentChoice("valeu, obrigado", docs)).toHaveLength(0);
   });
 });
 

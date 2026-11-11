@@ -2,6 +2,7 @@ import { adminDb } from "@/lib/supabase";
 import { chatWithAgent, chatWithAllAgents } from "@/lib/agent";
 import { createPropertyFlyerUrl } from "@/lib/flyer";
 import { transcribeAudio } from "@/lib/extract";
+import { synthesizeSpeech } from "@/lib/elevenlabs";
 import { signedDocumentUrl } from "@/lib/storage";
 import {
   detectAvailabilityIntent,
@@ -12,6 +13,7 @@ import {
   isCapabilityQuestion,
   listPropertyOptions,
   matchChoice,
+  matchDocumentChoice,
   propertyCaption,
   propertySearchWords,
   resolvePropertyForMedia,
@@ -21,6 +23,18 @@ import {
   type Property,
 } from "@/lib/whatsapp-media";
 import { searchProperties } from "@/lib/properties";
+import {
+  buildCrmContext,
+  confirmMessageFor,
+  detectCrmQueryIntent,
+  detectStaffIntent,
+  executeStaffAction,
+  extractStaffAction,
+  findStaffByPhone,
+  isConfirmation,
+  type StaffAction,
+  type StaffMember,
+} from "@/lib/bitrix";
 import { NextRequest, NextResponse } from "next/server";
 
 function authorized(req: NextRequest) {
@@ -29,8 +43,11 @@ function authorized(req: NextRequest) {
 }
 
 type PendingChoice = { properties: Property[]; ts: number };
+type PendingDocChoice = { docs: { id: string; title: string; path: string }[]; ts: number };
 const pendingChoices = new Map<string, PendingChoice>();
+const pendingDocChoices = new Map<string, PendingDocChoice>();
 const pendingMediaTargets = new Map<string, number>();
+const pendingStaffActions = new Map<string, { action: StaffAction; staff: StaffMember; ts: number }>();
 const PENDING_TTL_MS = 5 * 60_000;
 
 const CAPABILITY_REPLY =
@@ -41,25 +58,27 @@ function formatPropertyList(properties: Property[]): string {
   return properties.map((p) => `Ref ${p.reference} - ${p.title ?? "sem título"}`).join("\n");
 }
 
-async function existingDocumentsMedia(words: string[], agentId: string | null, caption: string): Promise<MediaItem[]> {
-  const docs = await findExistingPdfDocuments(words, agentId);
-  const items: MediaItem[] = [];
-  for (const doc of docs) {
-    try {
-      // links externos (ex: Google Drive) já são públicos — só assina caminhos do Supabase
-      const url = doc.path.startsWith("http") ? doc.path : await signedDocumentUrl(doc.path);
-      items.push({
-        type: "document",
-        url,
-        fileName: `${doc.title.replace(/[^\w\s.-]/g, "").trim() || "documento"}.pdf`,
-        mimetype: "application/pdf",
-        caption,
-      });
-    } catch (error) {
-      console.error("wa_signed_doc_failed", error instanceof Error ? error.message : "unknown");
-    }
+async function docToMediaItem(doc: { title: string; path: string }, caption: string): Promise<MediaItem | null> {
+  try {
+    // links externos (ex: Google Drive) já são públicos — só assina caminhos do Supabase
+    const url = doc.path.startsWith("http") ? doc.path : await signedDocumentUrl(doc.path);
+    return {
+      type: "document",
+      url,
+      fileName: `${doc.title.replace(/[^\w\s.-]/g, "").trim() || "documento"}.pdf`,
+      mimetype: "application/pdf",
+      caption,
+    };
+  } catch (error) {
+    console.error("wa_signed_doc_failed", error instanceof Error ? error.message : "unknown");
+    return null;
   }
-  return items;
+}
+
+async function existingDocumentsMedia(words: string[], agentId: string | null, caption: string, limit = 3): Promise<MediaItem[]> {
+  const docs = await findExistingPdfDocuments(words, agentId, limit);
+  const items = await Promise.all(docs.map((doc) => docToMediaItem(doc, caption)));
+  return items.filter((item): item is MediaItem => item !== null);
 }
 
 /** Resposta de mídia para um imóvel já identificado: fotos + PDFs (existentes > gerado). */
@@ -101,9 +120,19 @@ async function buildMediaResponse(text: string, agentId: string | null, pendingK
   const resolution = await resolvePropertyForMedia(text);
 
   if (resolution.kind === "none") {
-    const docs = await existingDocumentsMedia(searchWordsFor(text), agentId, "");
-    if (docs.length) {
-      return { reply: "Mandei os PDFs que encontrei com esse nome. Se quiser de um imóvel específico, me passa a referência (ex: ref 123).", media: docs };
+    const foundDocs = await findExistingPdfDocuments(searchWordsFor(text), agentId, 8);
+    if (foundDocs.length === 1) {
+      const media = await docToMediaItem(foundDocs[0], "");
+      return {
+        reply: `Não achei esse imóvel no estoque, mas encontrei este material no acervo: ${foundDocs[0].title}. Mandei em seguida.`,
+        media: media ? [media] : undefined,
+      };
+    }
+    if (foundDocs.length > 1) {
+      // vários materiais podem ser de empreendimentos diferentes ("Exclusive Safira" vs "Residencial Safira") — confirma antes
+      pendingDocChoices.set(pendingKey, { docs: foundDocs, ts: Date.now() });
+      const list = foundDocs.map((d, i) => `${i + 1}. ${d.title}`).join("\n");
+      return { reply: `Não achei esse imóvel no estoque, mas encontrei estes materiais no acervo:\n${list}\n\nQual deles você quer? (manda o número ou o nome — ou "todos")` };
     }
     if (isCapabilityQuestion(text) || MEDIA_LIKE_QUESTION.test(text)) return { reply: CAPABILITY_REPLY };
     return { reply: "Não consegui identificar qual imóvel você procura. Me passa a referência? (ex: ref 123)" };
@@ -163,8 +192,8 @@ async function buildAvailabilityResponse(text: string, agentId: string | null, p
   if (effectiveWords.length) {
     for (const option of options.slice(0, 3)) {
       const docs = await existingDocumentsMedia(propertySearchWords(option), agentId, "Flyer do imóvel");
-      const doc = docs.find((d) => !usedDocs.has(d.url));
-      if (doc) {
+      const doc = docs.find((d) => d.url && !usedDocs.has(d.url));
+      if (doc?.url) {
         usedDocs.add(doc.url);
         media.push(doc);
       }
@@ -181,6 +210,21 @@ async function buildAvailabilityResponse(text: string, agentId: string | null, p
     : "Quer fotos, PDF ou detalhes de algum? Me diz o nome, a ref, outro bairro ou região.";
 
   return { reply: `${header}\n\n${list}\n\n${note}`, media: media.length ? media : undefined };
+}
+
+/** Resposta do webhook. Se a mensagem chegou como nota de voz, devolve também áudio (ElevenLabs). */
+async function waRespond(body: { audio?: string | null }, payload: { reply?: string | null; media?: MediaItem[]; [k: string]: unknown }) {
+  if (body.audio && payload.reply) {
+    try {
+      const buf = await synthesizeSpeech(payload.reply);
+      if (buf) {
+        payload.media = [...(payload.media ?? []), { type: "audio", data: buf.toString("base64"), mimetype: "audio/ogg; codecs=opus", ptt: true }];
+      }
+    } catch (error) {
+      console.error("wa_tts_failed", error instanceof Error ? error.message : "unknown");
+    }
+  }
+  return NextResponse.json(payload);
 }
 
 export async function POST(req: NextRequest) {
@@ -201,12 +245,13 @@ export async function POST(req: NextRequest) {
   if (body.type === "message") {
     const { data: session } = await db
       .from("wa_sessions")
-      .select("id, agent_id, status")
+      .select("id, agent_id, status, organization_id")
       .eq("id", body.sessionId)
       .single();
-    if (!session || session.status !== "connected") return NextResponse.json({ reply: null });
+    if (!session || session.status !== "connected") return waRespond(body, { reply: null });
 
-    const agentId = (session as { agent_id?: string | null }).agent_id ?? null;
+    let agentId = (session as { agent_id?: string | null }).agent_id ?? null;
+    const organizationId = (session as { organization_id?: string }).organization_id ?? null;
     const contactId = `wa:${body.participant ?? body.from ?? "unknown"}`;
     const pendingKey = `${body.sessionId}:${contactId}`;
 
@@ -221,16 +266,94 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         console.error("wa_transcribe_failed", error instanceof Error ? error.message : "unknown");
       }
-      if (!text) return NextResponse.json({ reply: "Não consegui entender esse áudio. Pode mandar por escrito?" });
+      if (!text) return waRespond(body, { reply: "Não consegui entender esse áudio. Pode mandar por escrito?" });
     }
 
-    if (!text) return NextResponse.json({ reply: null });
+    if (!text) return waRespond(body, { reply: null });
+
+    // ── Identifica equipe (número cadastrado no Bitrix) e roteia para o agente interno ──
+    let staff: Awaited<ReturnType<typeof findStaffByPhone>> = null;
+    try {
+      staff = await findStaffByPhone(body.participant ?? body.from ?? "");
+    } catch (error) {
+      console.error("wa_staff_lookup_failed", error instanceof Error ? error.message : "unknown");
+    }
+
+    if (staff && organizationId) {
+      // Equipe sempre fala com o agente interno de CRM, independente do agente público da sessão.
+      const { data: internal } = await db
+        .from("agents")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .ilike("name", "%crm%")
+        .limit(1)
+        .maybeSingle();
+      if (internal?.id) agentId = internal.id;
+    }
+
+    // ── Fluxo de equipe: ações pendentes de confirmação no Bitrix ──
+    const pendingStaff = pendingStaffActions.get(pendingKey);
+    if (pendingStaff) {
+      pendingStaffActions.delete(pendingKey);
+      if (Date.now() - pendingStaff.ts < PENDING_TTL_MS) {
+        if (isConfirmation(text)) {
+          try {
+            const reply = await executeStaffAction(pendingStaff.action, pendingStaff.staff);
+            return waRespond(body, { reply });
+          } catch (error) {
+            console.error("wa_b24_action_failed", error instanceof Error ? error.message : "unknown");
+            return waRespond(body, { reply: "Não consegui gravar no Bitrix agora. Manda de novo que eu tento outra vez." });
+          }
+        }
+        if (!detectStaffIntent(text)) {
+          return waRespond(body, { reply: "Beleza, cancelei. Precisar de algo é só mandar." });
+        }
+      }
+    }
+
+    // ── Fluxo de equipe: agendar visita / cadastrar cliente / concluir tarefa ──
+    if (detectStaffIntent(text)) {
+      try {
+        if (staff) {
+          const action = await extractStaffAction(text);
+          if (action) {
+            pendingStaffActions.set(pendingKey, { action, staff, ts: Date.now() });
+            return waRespond(body, { reply: confirmMessageFor(action, staff.name) });
+          }
+          return waRespond(body, {
+            reply:
+              "Quase lá — me manda no formato: cliente, dia e hora, e o imóvel (ex: \"agenda visita com a Ana sábado 14h no Neo Pampulha\").",
+          });
+        }
+      } catch (error) {
+        console.error("wa_staff_flow_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
 
     const pendingMediaTs = pendingMediaTargets.get(pendingKey);
     if (pendingMediaTs) {
       pendingMediaTargets.delete(pendingKey);
       if (Date.now() - pendingMediaTs < PENDING_TTL_MS && !detectMediaIntent(text)) {
-        return NextResponse.json(await buildMediaResponse(`manda o flyer e as fotos do ${text}`, agentId, pendingKey));
+        return waRespond(body, await buildMediaResponse(`manda o flyer e as fotos do ${text}`, agentId, pendingKey));
+      }
+    }
+
+    const pendingDocs = pendingDocChoices.get(pendingKey);
+    if (pendingDocs) {
+      pendingDocChoices.delete(pendingKey);
+      if (Date.now() - pendingDocs.ts < PENDING_TTL_MS) {
+        const chosen = matchDocumentChoice(text, pendingDocs.docs);
+        if (chosen.length) {
+          const media = (await Promise.all(chosen.map((doc) => docToMediaItem(doc, "")))).filter(
+            (item): item is MediaItem => item !== null,
+          );
+          if (media.length) {
+            return waRespond(body, {
+              reply: chosen.length === 1 ? `Mandei: ${chosen[0].title}` : `Mandei ${media.length} arquivos.`,
+              media,
+            });
+          }
+        }
       }
     }
 
@@ -243,11 +366,11 @@ export async function POST(req: NextRequest) {
         const matched = matchChoice(text, pending.properties);
         if (matched.length === 1) {
           pendingChoices.delete(pendingKey);
-          return NextResponse.json(await propertyMediaResponse(matched[0], agentId));
+          return waRespond(body, await propertyMediaResponse(matched[0], agentId));
         }
         if (matched.length > 1) {
           pendingChoices.set(pendingKey, { properties: matched, ts: Date.now() });
-          return NextResponse.json({ reply: `Ainda tenho mais de um candidato:\n${formatPropertyList(matched)}\nQual deles?` });
+          return waRespond(body, { reply: `Ainda tenho mais de um candidato:\n${formatPropertyList(matched)}\nQual deles?` });
         }
         // "manda o flyer deles" / "quero as 2 opções" — pedido de material sobre as opções listadas
         if (detectMediaIntent(text)) {
@@ -264,7 +387,7 @@ export async function POST(req: NextRequest) {
           }
           pendingChoices.delete(pendingKey);
           if (media.length) {
-            return NextResponse.json({
+            return waRespond(body, {
               reply: `Mandei o material de ${unique.length > 3 ? "3 das" : "todas as"} opções: ${unique.slice(0, 3).map((p) => p.title ?? `Ref ${p.reference}`).join(", ")}.`,
               media,
             });
@@ -276,7 +399,7 @@ export async function POST(req: NextRequest) {
 
     if (detectAvailabilityIntent(text)) {
       try {
-        return NextResponse.json(await buildAvailabilityResponse(text, agentId, pendingKey));
+        return waRespond(body, await buildAvailabilityResponse(text, agentId, pendingKey));
       } catch (error) {
         console.error("wa_availability_failed", error instanceof Error ? error.message : "unknown");
       }
@@ -286,21 +409,31 @@ export async function POST(req: NextRequest) {
       try {
         const response = await buildMediaResponse(text, agentId, pendingKey);
         if (!response.media?.length) pendingMediaTargets.set(pendingKey, Date.now());
-        return NextResponse.json(response);
+        return waRespond(body, response);
       } catch (error) {
         console.error("wa_media_flow_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
+
+    // ── Consulta ao CRM: só para números da equipe identificados no Bitrix ──
+    let crmContext: string | undefined;
+    if (staff && detectCrmQueryIntent(text)) {
+      try {
+        crmContext = (await buildCrmContext(text, staff)) ?? undefined;
+      } catch (error) {
+        console.error("wa_crm_context_failed", error instanceof Error ? error.message : "unknown");
       }
     }
 
     try {
       // agent_id null = agente geral (contexto de todos os agentes)
       const { answer } = agentId
-        ? await chatWithAgent(agentId, text, undefined, contactId)
-        : await chatWithAllAgents(text, undefined, contactId);
-      return NextResponse.json({ reply: answer });
+        ? await chatWithAgent(agentId, text, undefined, contactId, crmContext)
+        : await chatWithAllAgents(text, undefined, contactId, crmContext);
+      return waRespond(body, { reply: answer });
     } catch (error) {
       console.error("wa_message_reply_failed", error instanceof Error ? error.message : "unknown");
-      return NextResponse.json({ reply: null });
+      return waRespond(body, { reply: null });
     }
   }
 

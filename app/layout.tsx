@@ -36,6 +36,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   }
 
   const isLogin = pathname === "/login";
+  const isPublicHome = pathname === "/";
 
   useEffect(() => {
     function update() { setToken(getToken()); setRole(getRole()); }
@@ -62,20 +63,21 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <link rel="manifest" href="/manifest.webmanifest" />
       <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       <PwaRegister />
-      {!isLogin && token && (
+      {!isLogin && !isPublicHome && token && (
         <header style={{ position: "sticky", top: 0, zIndex: 40 }}>
           <Link href={isTrainee ? "/academy" : "/admin"}><Image src="/logo-fq.png" alt="FQ Imóveis" width={160} height={48} priority /></Link>
           <nav style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center" }}>
+            <Link href="/" className="button ghost">Home</Link>
             {!isTrainee && <Link href="/chat" className="button ghost">Chat</Link>}
             <Link href="/academy" className="button ghost">Academy</Link>
-            {!isTrainee && <Link href="/admin" className="button ghost">Treinar</Link>}
+            {!isTrainee && <Link href="/admin" className="button ghost">Painel IA</Link>}
             <ThemeToggle />
             <button onClick={logout} className="button">Sair</button>
           </nav>
         </header>
       )}
       {children}
-      {!isLogin && token && !isTrainee && <FloatingAssistant />}
+      {!isLogin && !isPublicHome && token && !isTrainee && <FloatingAssistant />}
     </body>
   </html>;
 }

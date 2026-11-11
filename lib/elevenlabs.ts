@@ -49,6 +49,33 @@ export async function deleteCallAgent(agentId: string) {
   await fetch(`${API}/convai/agents/${agentId}`, { method: "DELETE", headers: headers() }).catch(() => {});
 }
 
+const TTS_MAX_CHARS = 2000;
+
+/** Sintetiza texto em áudio ogg/opus (nota de voz do WhatsApp). Retorna null se sem chave. */
+export async function synthesizeSpeech(text: string): Promise<Buffer | null> {
+  if (!KEY()) return null;
+  const clean = text
+    .replace(/[*_~`#>•📋✅❌⚠️📌🤖]/g, "")
+    .replace(/https?:\/\/\S+/g, "o link que mandei")
+    .trim()
+    .slice(0, TTS_MAX_CHARS);
+  if (!clean) return null;
+
+  const res = await fetch(`${API}/text-to-speech/${VOICE()}?output_format=opus_48000_64`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      text: clean,
+      model_id: "eleven_flash_v2_5",
+      language_code: "pt",
+      voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2 },
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`ElevenLabs TTS: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 // O módulo entra via dynamic variables ({{modulo_titulo}}/{{modulo_objetivo}})
 // no startSession — assim o mesmo agente serve para todos os módulos.
 export function buildVoicePrompt(perfil: Record<string, string | number | null>) {

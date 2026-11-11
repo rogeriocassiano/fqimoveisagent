@@ -75,6 +75,15 @@ async function sendMedia(sock, jid, media, quoted) {
           },
           { quoted }
         );
+      } else if (item?.type === "audio") {
+        const source = item.data ? Buffer.from(item.data, "base64") : item.url ? { url: item.url } : null;
+        if (source) {
+          await sock.sendMessage(
+            jid,
+            { audio: source, mimetype: item.mimetype || "audio/ogg; codecs=opus", ptt: item.ptt !== false },
+            { quoted }
+          );
+        }
       }
     } catch (err) {
       logger.error({ err: String(err) }, "send_media_failed");

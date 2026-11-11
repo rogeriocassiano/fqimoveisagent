@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Rotas que exigem login e NÃO são acessíveis para trainees
-const PROTECTED = ["/admin", "/chat", "/api/agents", "/api/chat", "/api/properties", "/api/users", "/api/files", "/api/extract", "/api/settings", "/api/whatsapp"];
+const PROTECTED = ["/admin", "/chat", "/api/agents", "/api/chat", "/api/users", "/api/files", "/api/extract", "/api/settings", "/api/whatsapp"];
 // Rotas que exigem login e SÃO acessíveis para trainees
 const TRAINEE_ALLOWED = ["/academy", "/api/roleplay", "/api/academy"];
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -99,14 +99,14 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isLogin && token) {
-    return finish(NextResponse.redirect(new URL(isTrainee ? "/academy" : "/admin", request.url)), true);
+    return finish(NextResponse.redirect(new URL(isTrainee ? "/academy" : "/", request.url)), true);
   }
 
-  if (pathname === "/") {
-    return finish(NextResponse.redirect(new URL(token ? (isTrainee ? "/academy" : "/admin") : "/login", request.url)), true);
-  }
-
-  return finish(NextResponse.next());
+  const response = finish(NextResponse.next());
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
+  return response;
 }
 
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|logo-fq.png).*)"] };

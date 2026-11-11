@@ -1,5 +1,5 @@
 import { read, utils } from "xlsx";
-import { GoogleGenAI } from "@google/genai";
+import { genaiClient } from "./genai-client";
 import { serverEnv } from "./env";
 
 export async function extractTextFromFile(file: File): Promise<string> {
@@ -18,7 +18,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
   if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
     const env = serverEnv();
-    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    const ai = genaiClient();
     const response = await ai.models.generateContent({
       model: env.GEMINI_MODEL,
       contents: [
@@ -39,7 +39,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
   if (file.type.startsWith("image/")) {
     const env = serverEnv();
-    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    const ai = genaiClient();
     const response = await ai.models.generateContent({
       model: env.GEMINI_MODEL,
       contents: [
@@ -52,7 +52,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
   if (file.type.startsWith("video/")) {
     const env = serverEnv();
-    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+    const ai = genaiClient();
     const response = await ai.models.generateContent({
       model: env.GEMINI_MODEL,
       contents: [
@@ -69,7 +69,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
 export async function transcribeAudio(file: File): Promise<string> {
   const buffer = Buffer.from(new Uint8Array(await file.arrayBuffer()));
   const env = serverEnv();
-  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const ai = genaiClient();
   const mime = file.type || "audio/ogg";
   const response = await ai.models.generateContent({
     model: env.GEMINI_MODEL,

@@ -17,3 +17,6 @@ wa-server/auth/
 
 # WhatsApp simulator output
 wa-sim-media/
+
+# Devin local MCP config (contains tokens)
+.devin/mcp_config.local.json
