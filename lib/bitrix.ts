@@ -4,7 +4,7 @@ import { serverEnv } from "./env";
 const B24_TIMEOUT_MS = 15_000;
 const USERS_CACHE_TTL_MS = 10 * 60_000;
 
-type B24User = {
+export type B24User = {
   ID: string;
   NAME?: string;
   LAST_NAME?: string;
@@ -38,7 +38,7 @@ export function normalizePhone(value: string | null | undefined): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-async function b24Call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+export async function b24Call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   const base = process.env.B24_WEBHOOK_URL;
   if (!base) throw new Error("B24_WEBHOOK_URL não configurada");
   const res = await fetch(`${base.replace(/\/$/, "")}/${method}.json`, {
@@ -54,7 +54,7 @@ async function b24Call<T>(method: string, params: Record<string, unknown> = {}):
   return data?.result as T;
 }
 
-async function listBitrixUsers(): Promise<B24User[]> {
+export async function listBitrixUsers(): Promise<B24User[]> {
   if (usersCache && Date.now() - usersCache.ts < USERS_CACHE_TTL_MS) return usersCache.users;
   const all: B24User[] = [];
   let start = 0;
@@ -168,7 +168,7 @@ export async function createCrmDeal(input: { title: string; contactId?: number; 
 
 // ─── Consultas ao CRM/Tarefas para a IA responder perguntas da equipe ─────────
 
-type B24Task = {
+export type B24Task = {
   id?: string;
   ID?: string;
   title?: string;
@@ -187,7 +187,7 @@ const TASK_STATUS: Record<string, string> = { "1": "nova", "2": "pendente", "3":
 // array de STATUS com RESPONSIBLE_ID — por isso filtramos em memória.
 const CLOSED_STATUSES = new Set([5, 6, 7]); // concluída, adiada, recusada
 
-async function queryTasks(input: { responsibleId?: number; deadlineBefore?: Date; deadlineAfter?: Date; onlyClosed?: boolean }, limit = 40): Promise<B24Task[]> {
+export async function queryTasks(input: { responsibleId?: number; deadlineBefore?: Date; deadlineAfter?: Date; onlyClosed?: boolean; includeClosed?: boolean; titleContains?: string }, limit = 40): Promise<B24Task[]> {
   const filter: Record<string, unknown> = { "!STATUS": 5 };
   if (input.responsibleId) filter.RESPONSIBLE_ID = input.responsibleId;
 
@@ -206,8 +206,9 @@ async function queryTasks(input: { responsibleId?: number; deadlineBefore?: Date
 
   return all
     .filter((t) => {
+      if (input.titleContains && !String(t.title ?? t.TITLE ?? "").toLowerCase().includes(input.titleContains.toLowerCase())) return false;
       const closed = CLOSED_STATUSES.has(Number(t.status ?? t.STATUS ?? 0));
-      if (input.onlyClosed ? !closed : closed) return false;
+      if (input.includeClosed ? false : input.onlyClosed ? !closed : closed) return false;
       const dl = t.deadline ?? t.DEADLINE ? new Date((t.deadline ?? t.DEADLINE)!).getTime() : NaN;
       if (input.deadlineBefore && !(dl && dl < input.deadlineBefore.getTime())) return false;
       if (input.deadlineAfter && !(dl && dl > input.deadlineAfter.getTime())) return false;

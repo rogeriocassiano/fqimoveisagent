@@ -416,6 +416,17 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Consulta ao CRM: só para números da equipe identificados no Bitrix ──
+    // Function calling: o modelo chama a API real do Bitrix conforme a pergunta.
+    if (staff && detectCrmQueryIntent(text)) {
+      try {
+        const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
+        const reply = await answerWithBitrixTools(text, staff);
+        if (reply) return waRespond(body, { reply });
+      } catch (error) {
+        console.error("wa_crm_tools_failed", error instanceof Error ? error.message : "unknown");
+      }
+    }
+
     let crmContext: string | undefined;
     if (staff && detectCrmQueryIntent(text)) {
       try {
