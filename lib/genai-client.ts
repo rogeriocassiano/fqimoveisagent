@@ -6,7 +6,9 @@ import { GoogleGenAI } from "@google/genai";
  * - Senão → API key do AI Studio (GEMINI_API_KEY)
  */
 export function genaiClient(): GoogleGenAI {
-  const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64
+    ? Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64, "base64").toString("utf8")
+    : process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   const project = process.env.GOOGLE_CLOUD_PROJECT;
   if (saJson && project) {
     const credentials = JSON.parse(saJson);
