@@ -97,12 +97,20 @@ export async function POST(request: Request) {
     }
 
     // Perguntas de CRM só recebem dados do Bitrix para usuários autenticados.
+    // Function calling primeiro; se falhar, cai no contexto fixo como antes.
     let crmContext: string | undefined;
-    if (detectCrmQueryIntent(message)) {
+    if (!file && detectCrmQueryIntent(message)) {
       try {
         const session = await getSessionUser(request);
         if (session) {
           const staff = session.name ? await findStaffByName(session.name).catch(() => null) : null;
+          try {
+            const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
+            const reply = await answerWithBitrixTools(message, staff);
+            if (reply) return Response.json({ answer: reply, sources: [], media: [], fileUrl });
+          } catch (error) {
+            console.error("crm_tools_failed", error instanceof Error ? error.message : "unknown");
+          }
           crmContext = (await buildCrmContext(message, staff)) ?? undefined;
         }
       } catch (error) {
