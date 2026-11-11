@@ -192,16 +192,26 @@ export async function queryTasks(input: { responsibleId?: number; deadlineBefore
   if (input.responsibleId) filter.RESPONSIBLE_ID = input.responsibleId;
 
   const all: B24Task[] = [];
-  for (let start = 0; start < 500; start += 50) {
-    const result = await b24Call<{ tasks?: B24Task[] } | B24Task[]>("tasks.task.list", {
-      filter,
-      select: ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID", "STATUS"],
-      order: { DEADLINE: "asc" },
-      start,
-    }).catch(() => null);
-    const tasks = Array.isArray(result) ? result : (result?.tasks ?? []);
-    all.push(...tasks);
-    if (tasks.length < 50) break;
+  // Páginas em paralelo (4 por vez) — o Bitrix pagina de 50 em 50 e a latência
+  // sequencial estourava o timeout da function no Netlify.
+  for (let start = 0; start < 500; start += 200) {
+    const pages = await Promise.all(
+      [0, 1, 2, 3].map((i) =>
+        b24Call<{ tasks?: B24Task[] } | B24Task[]>("tasks.task.list", {
+          filter,
+          select: ["ID", "TITLE", "DEADLINE", "RESPONSIBLE_ID", "STATUS"],
+          order: { DEADLINE: "asc" },
+          start: start + i * 50,
+        }).catch(() => null),
+      ),
+    );
+    let exhausted = false;
+    for (const result of pages) {
+      const tasks = Array.isArray(result) ? result : (result?.tasks ?? []);
+      all.push(...tasks);
+      if (tasks.length < 50) { exhausted = true; break; }
+    }
+    if (exhausted) break;
   }
 
   return all
