@@ -189,9 +189,10 @@ const TASK_STATUS: Record<string, string> = { "1": "nova", "2": "pendente", "3":
 // array de STATUS com RESPONSIBLE_ID — por isso filtramos em memória.
 const CLOSED_STATUSES = new Set([5, 6, 7]); // concluída, adiada, recusada
 
-export async function queryTasks(input: { responsibleId?: number; deadlineBefore?: Date; deadlineAfter?: Date; onlyClosed?: boolean; includeClosed?: boolean; titleContains?: string }, limit = 40): Promise<B24Task[]> {
-  const filter: Record<string, unknown> = { "!STATUS": 5 };
+export async function queryTasks(input: { responsibleId?: number; deadlineBefore?: Date; deadlineAfter?: Date; onlyClosed?: boolean; includeClosed?: boolean; titleContains?: string; extraFilter?: Record<string, unknown> }, limit = 40): Promise<B24Task[]> {
+  const filter: Record<string, unknown> = input.onlyClosed ? { STATUS: 5 } : input.includeClosed ? {} : { "!STATUS": 5 };
   if (input.responsibleId) filter.RESPONSIBLE_ID = input.responsibleId;
+  if (input.extraFilter) Object.assign(filter, input.extraFilter);
 
   const cacheKey = JSON.stringify(filter);
   const hit = tasksCache.get(cacheKey);

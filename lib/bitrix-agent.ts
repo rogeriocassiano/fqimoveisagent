@@ -23,10 +23,14 @@ const CRM_TOOLS: Tool[] = [
           properties: {
             responsible_name: { type: Type.STRING, description: "Nome do responsável (aceita primeiro nome). Omita para todas as tarefas." },
             title_contains: { type: Type.STRING, description: "Texto que o título da tarefa deve conter (ex: nome de cliente, empreendimento)." },
-            status: { type: Type.STRING, format: "enum", enum: ["open", "closed", "all"], description: "open=em aberto (padrão), closed=concluídas/adiadas, all=todas." },
+            status: { type: Type.STRING, format: "enum", enum: ["open", "closed", "all"], description: "open=em aberto (padrão), closed=concluídas, all=todas." },
             overdue: { type: Type.BOOLEAN, description: "true = só tarefas com prazo já vencido." },
             due_before: { type: Type.STRING, description: "Data ISO (YYYY-MM-DD) — só tarefas com prazo antes dela." },
             due_after: { type: Type.STRING, description: "Data ISO (YYYY-MM-DD) — só tarefas com prazo depois dela." },
+            created_after: { type: Type.STRING, description: "Data ISO — tarefas criadas depois dela (CREATED_DATE)." },
+            created_before: { type: Type.STRING, description: "Data ISO — tarefas criadas antes dela." },
+            closed_after: { type: Type.STRING, description: "Data ISO — tarefas concluídas depois dela (CLOSED_DATE). Combine com status=closed." },
+            closed_before: { type: Type.STRING, description: "Data ISO — tarefas concluídas antes dela." },
             limit: { type: Type.INTEGER, description: "Quantas tarefas listar (padrão 20, máx 50). O total real sempre vem no campo total." },
           },
         },
@@ -43,6 +47,10 @@ const CRM_TOOLS: Tool[] = [
             overdue: { type: Type.BOOLEAN },
             due_before: { type: Type.STRING },
             due_after: { type: Type.STRING },
+            created_after: { type: Type.STRING },
+            created_before: { type: Type.STRING },
+            closed_after: { type: Type.STRING },
+            closed_before: { type: Type.STRING },
           },
         },
       },
@@ -70,6 +78,23 @@ const CRM_TOOLS: Tool[] = [
         description: "Lista os usuários da equipe no Bitrix24 (id, nome, ativo).",
         parameters: { type: Type.OBJECT, properties: {} },
       },
+      {
+        name: "query_bitrix",
+        description:
+          "Chama QUALQUER método de LEITURA da API REST do Bitrix24 (terminado em .list ou .get) com filtros livres. Use quando as outras ferramentas não cobrirem a pergunta. Ex.: crm.deal.list com filter {'>=DATE_CREATE':'2026-11-01'}, crm.activity.list, crm.status.list (etapas do funil), crm.lead.list, crm.requisite.list, task.checklistitem.getlist.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            method: { type: Type.STRING, description: "Nome do método REST, ex.: 'crm.deal.list', 'crm.activity.list'." },
+            filter: { type: Type.OBJECT, description: "Filtros do Bitrix, ex.: {'%TITLE':'Simone'} ou {'>=DATE_CREATE':'2026-11-01','<=DATE_CREATE':'2026-11-30'}." },
+            select: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Campos a retornar (ex.: ['ID','TITLE','DATE_CREATE'])." },
+            order: { type: Type.OBJECT, description: "Ordenação, ex.: {'DATE_CREATE':'desc'}." },
+            start: { type: Type.INTEGER, description: "Paginação (múltiplos de 50). Omita para paginar automaticamente e obter o total real." },
+            paginate: { type: Type.BOOLEAN, description: "Padrão true para .list: busca todas as páginas (até 500) e retorna o total real." },
+          },
+          required: ["method"],
+        },
+      },
     ],
   },
 ];
@@ -77,9 +102,23 @@ const CRM_TOOLS: Tool[] = [
 const SYSTEM_PROMPT = `Você é o SR. Queiroz, assistente interno da equipe FQ Imóveis, conectado ao Bitrix24 em tempo real.
 Despojado e profissional, fala pt-BR. REGRAS:
 - Você TEM ferramentas de leitura do Bitrix: use-as sempre que a pergunta depender de dados reais. NUNCA invente números, tarefas, clientes ou negócios.
-- Chame quantas ferramentas precisar (ex.: count_tasks para "quantas", list_tasks para listar, list_crm para clientes/negócios).
+- Chame quantas ferramentas precisar (ex.: count_tasks para "quantas", list_tasks para listar, list_crm para clientes/negócios, query_bitrix para qualquer leitura que falte).
+- CATÁLOGO query_bitrix (métodos úteis; só .list/.get):
+  • CRM: crm.contact.list, crm.lead.list, crm.deal.list, crm.company.list, crm.quote.list (propostas), crm.invoice.list, crm.activity.list (atividades: ligações, e-mails, reuniões — filtre por TYPE_ID e COMPLETED), crm.product.list, crm.requisite.list, crm.address.list, crm.status.list (etapas/status), crm.stagehistory.list, crm.timeline.comment.list, crm.multifield.fields
+  • Tarefas: task.commentitem.getlist {taskId}, task.checklistitem.getlist {taskId}, task.elapseditem.getlist {taskId} (tempo gasto)
+  • Estrutura: department.get, user.get, sonet_group.get (grupos de trabalho)
+  • Agenda: calendar.event.get (eventos), calendar.section.get
+  • Docs: disk.storage.getlist, lists.get (listas de trabalho — pode dar ACCESS_DENIED em alguns casos)
+  • Comunicação: mailservice.list, im.recent.list, telephony.externalcall.searchcrmentities
+  • Filtros de data comuns: >=DATE_CREATE / <=DATE_CREATE (criação), >=CLOSED_DATE / <=CLOSED_DATE (conclusão), >=DATE_MODIFY (alteração), >=DEADLINE (prazo de tarefa)
+- SEMÂNTICA DO BITRIX (importante para não responder errado):
+  • "Visita realizada/feita" = TAREFA concluída (status=closed) com "visita" no título e closed_after/before no período. "Visita agendada" = tarefa aberta com "visita" no título.
+  • "Novos negócios/clientes/leads no mês" = filtro de criação: query_bitrix crm.deal.list (ou contact/lead) com filter {">=DATE_CREATE":"YYYY-MM-01","<=DATE_CREATE":"YYYY-MM-último"}.
+  • "Negócios fechados/ganhos" = crm.deal.list com filter {"STAGE_ID":"WON"} ou que contenha "WON"; etapas em crm.status.list.
+  • Tarefas atrasadas = overdue=true. Tarefas criadas no mês = created_after/before.
+  • Datas no fuso America/Sao_Paulo; use a data/hora atual informada para montar os intervalos.
 - Se um nome de pessoa for ambíguo, apresente as opções em vez de chutar.
-- Sempre informe o TOTAL quando existir (campo total), mesmo listando só os primeiros itens.
+- Sempre informe o TOTAL quando existir (campo total), mesmo listando só os primeiros itens. Se a lista vier paginada (50 itens) e o total for incerto, some paginando com o parâmetro start.
 - Para CRIAR, CONCLUIR ou ALTERAR registros você não executa direto: oriente o corretor a pedir o comando (ex.: "agenda visita com a Ana sábado 14h", "cadastra o cliente João", "conclui a tarefa 123") — o sistema pede confirmação antes de gravar.
 - Responda objetivo, formatando listas com • e datas curtas (dd/mm).`;
 
@@ -94,6 +133,12 @@ async function taskFilters(args: FnArgs) {
   if (args.overdue) f.deadlineBefore = new Date();
   if (args.due_before) f.deadlineBefore = new Date(`${args.due_before}T23:59:59-03:00`);
   if (args.due_after) f.deadlineAfter = new Date(`${args.due_after}T00:00:00-03:00`);
+  const extra: Record<string, unknown> = {};
+  if (args.created_after) extra[">=CREATED_DATE"] = `${args.created_after}T00:00:00-03:00`;
+  if (args.created_before) extra["<=CREATED_DATE"] = `${args.created_before}T23:59:59-03:00`;
+  if (args.closed_after) extra[">=CLOSED_DATE"] = `${args.closed_after}T00:00:00-03:00`;
+  if (args.closed_before) extra["<=CLOSED_DATE"] = `${args.closed_before}T23:59:59-03:00`;
+  if (Object.keys(extra).length) f.extraFilter = extra;
   if (args.responsible_name) {
     const candidates = await staffCandidates(String(args.responsible_name));
     if (candidates.length > 1) return { ambiguous: candidates.map((c) => c.name) };
@@ -169,6 +214,36 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
     case "list_users": {
       return users.map((u) => ({ id: u.ID, name: [u.NAME, u.LAST_NAME].filter(Boolean).join(" ").trim(), active: u.ACTIVE !== false }));
     }
+    case "query_bitrix": {
+      // Só leitura: métodos *.list/*.get. Escrita continua no fluxo de confirmação.
+      const method = String(args.method ?? "");
+      if (!/^[a-z][a-z0-9_.]*\.(list|get)$/i.test(method) || /\.(add|update|delete|start|finish|batch)\b/i.test(method)) {
+        return { error: `Método não permitido para leitura dinâmica: ${method}. Use apenas *.list ou *.get.` };
+      }
+      const params: Record<string, unknown> = {};
+      if (args.filter && typeof args.filter === "object") params.filter = args.filter;
+      if (Array.isArray(args.select)) params.select = args.select;
+      if (args.order && typeof args.order === "object") params.order = args.order;
+      const explicitStart = Number.isFinite(Number(args.start));
+      if (explicitStart) params.start = Number(args.start);
+
+      const isList = /\.list$/i.test(method);
+      const paginate = args.paginate !== false && isList && !explicitStart;
+      if (paginate) {
+        const all: unknown[] = [];
+        for (let start = 0; start < 500; start += 50) {
+          const page = await b24Call<unknown>(method, { ...params, start }).catch((e) => ({ error: e instanceof Error ? e.message : "erro na API" }));
+          if (!Array.isArray(page)) return page;
+          all.push(...page);
+          if (page.length < 50) break;
+        }
+        const json = JSON.stringify({ total: all.length, items: all });
+        return json.length > 20000 ? { total: all.length, truncated: true, items: all.slice(0, Math.max(1, Math.floor(all.length * (20000 / json.length)))) } : { total: all.length, items: all };
+      }
+      const result = await b24Call<unknown>(method, params).catch((e) => ({ error: e instanceof Error ? e.message : "erro na API" }));
+      const json = JSON.stringify(result);
+      return json.length > 20000 ? { truncated: true, note: "Resultado muito grande — refine o filtro/select.", preview: json.slice(0, 20000) } : result;
+    }
     default:
       return { error: `Ferramenta desconhecida: ${name}` };
   }
@@ -186,11 +261,22 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
   ];
 
   for (let turn = 0; turn < 8; turn++) {
-    const res = await ai.models.generateContent({
-      model: env.GEMINI_MODEL,
-      contents,
-      config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2, tools: CRM_TOOLS },
-    });
+    let res!: Awaited<ReturnType<typeof ai.models.generateContent>>;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        res = await ai.models.generateContent({
+          model: env.GEMINI_MODEL,
+          contents,
+          config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2, tools: CRM_TOOLS },
+        });
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const retryable = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|deadline/i.test(msg);
+        if (!retryable || attempt === 2) throw e;
+        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+      }
+    }
     const cand = res.candidates?.[0];
     const parts = (cand?.content?.parts ?? []) as { text?: string; functionCall?: { name: string; args?: FnArgs } }[];
     const calls = parts.filter((p) => p.functionCall);
