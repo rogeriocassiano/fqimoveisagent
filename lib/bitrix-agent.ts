@@ -116,6 +116,7 @@ Despojado e profissional, fala pt-BR. REGRAS:
   • "Visita realizada/feita" = TAREFA concluída (status=closed) com "visita" no título e closed_after/before no período. "Visita agendada" = tarefa aberta com "visita" no título.
   • "Novos negócios/clientes/leads no mês" = filtro de criação: query_bitrix crm.deal.list (ou contact/lead) com filter {">=DATE_CREATE":"YYYY-MM-01","<=DATE_CREATE":"YYYY-MM-último"}.
   • "Negócios fechados/ganhos" = crm.deal.list com filter {"STAGE_ID":"WON"} ou que contenha "WON"; etapas em crm.status.list.
+  • "Negócios ganhos/perdidos EM período" = STAGE_SEMANTIC_ID "S" (sucesso) / "F" (falha) + CLOSEDATE no intervalo (data de fechamento, não DATE_MODIFY que conta qualquer edição).
   • Tarefas atrasadas = overdue=true. Tarefas criadas no mês = created_after/before.
   • Datas no fuso America/Sao_Paulo; use a data/hora atual informada para montar os intervalos.
 - Se um nome de pessoa for ambíguo, apresente as opções em vez de chutar.
