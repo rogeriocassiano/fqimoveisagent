@@ -56,13 +56,13 @@ const CASES: [string, typeof TIAGO, () => Promise<number>][] = [
   ["quantos leads entraram esse mês?", FELIPE, () => created("crm.lead.list", P.thisMonth)],
   ["quantos contatos novos foram cadastrados ontem?", TIAGO, () => created("crm.contact.list", P.yesterday)],
   ["quantos negócios estão ganhos no total?", FELIPE, () => total("crm.deal.list", { STAGE_SEMANTIC_ID: "S" })],
-  ["quantos negócios foram perdidos esse mês?", FELIPE, () => total("crm.deal.list", { STAGE_SEMANTIC_ID: "F", ">=DATE_MODIFY": P.thisMonth.gte, "<=DATE_MODIFY": P.thisMonth.lte })],
+  ["quantos negócios foram perdidos esse mês?", FELIPE, () => total("crm.deal.list", { STAGE_SEMANTIC_ID: "F", ">=CLOSEDATE": P.thisMonth.gte, "<=CLOSEDATE": P.thisMonth.lte })],
   ["quantas tarefas foram criadas hoje?", TIAGO, () => total("tasks.task.list", { ">=CREATED_DATE": P.today.gte, "<=CREATED_DATE": P.today.lte })],
   ["quantas tarefas foram concluídas ontem?", FELIPE, () => total("tasks.task.list", { STATUS: 5, ">=CLOSED_DATE": P.yesterday.gte, "<=CLOSED_DATE": P.yesterday.lte })],
   ["quantas ligações foram registradas no crm hoje?", FELIPE, () => total("crm.activity.list", { TYPE_ID: 2, ">=CREATED": P.today.gte, "<=CREATED": P.today.lte })],
 ];
 
-describe("semântica CRM", () => {
+describe.skipIf(!B24)("semântica CRM", () => {
   writeFileSync("crm-semantics-report.txt", "");
   for (let i = 0; i < CASES.length; i++) {
     const [q, who, truthFn] = CASES[i];

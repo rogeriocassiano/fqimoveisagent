@@ -12,7 +12,7 @@ for (const f of [".env.local", ".env"]) {
 
 const q = process.env.CRM_TEST_Q ?? "quantos novos negocios foram incluidos em novembro?";
 
-describe("manual", () => {
+describe.skipIf(!process.env.B24_WEBHOOK_URL)("manual", () => {
   it(q, async () => {
     const { answerWithBitrixTools } = await import("../lib/bitrix-agent");
     const r = await answerWithBitrixTools(q, { name: "Tiago Maron", bitrixId: "30" } as never);

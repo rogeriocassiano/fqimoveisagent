@@ -125,6 +125,7 @@ Despojado e profissional, fala pt-BR. REGRAS:
 - Quando uma chamada retornar erro ou vazio, tente outra abordagem (outra ferramenta, outro filtro) antes de desistir.
 - ESCOPO: se a pergunta não citar uma pessoa e não disser "minha/eu", responda o total da EQUIPE TODA (sem responsible_name). Se fizer sentido, acrescente também o número do corretor que está perguntando. Nunca filtre pelo corretor por conta própria.
 - "Quantas visitas" (realizadas, agendadas, feitas): use count_tasks com title_contains="visita" + status correto (closed=realizada, open=agendada) + closed_after/before (realizada) ou due_after/before (agendada). Uma chamada resolve — não fique tentando variações.
+- Para UM dia específico (amanhã, hoje, dia 15): use o MESMO dia em _after e _before (ex: amanhã 13/11 → due_after="2026-11-13" e due_before="2026-11-13"). Não abra janela de dias extras.
 - Para CRIAR, CONCLUIR ou ALTERAR registros você não executa direto: oriente o corretor a pedir o comando (ex.: "agenda visita com a Ana sábado 14h", "cadastra o cliente João", "conclui a tarefa 123") — o sistema pede confirmação antes de gravar.
 - Responda objetivo, formatando listas com • e datas curtas (dd/mm).`;
 
@@ -334,16 +335,19 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
     if (!calls.length) return res.text?.trim() || null;
 
     contents.push({ role: "model", parts });
-    const fnParts = [] as Record<string, unknown>[];
-    for (const c of calls) {
-      const out = await executeTool(c.functionCall!.name, c.functionCall!.args ?? {}, users).catch((e) => ({ error: e instanceof Error ? e.message : "erro" }));
-      console.error("crm_tool_call", c.functionCall!.name, JSON.stringify(c.functionCall!.args ?? {}), "->", JSON.stringify(out).slice(0, 500));
-      if (process.env.CRM_DEBUG) {
-        const { appendFileSync } = await import("node:fs");
-        appendFileSync("crm-tool-log.txt", `${c.functionCall!.name} ${JSON.stringify(c.functionCall!.args ?? {})} -> ${JSON.stringify(out).slice(0, 800)}\n`);
-      }
-      fnParts.push({ functionResponse: { name: c.functionCall!.name, response: { result: out } } });
+    const outs = await Promise.all(
+      calls.map((c) => executeTool(c.functionCall!.name, c.functionCall!.args ?? {}, users).catch((e) => ({ error: e instanceof Error ? e.message : "erro" }))),
+    );
+    for (const [i, c] of calls.entries()) {
+      console.error("crm_tool_call", c.functionCall!.name, JSON.stringify(c.functionCall!.args ?? {}), "->", JSON.stringify(outs[i]).slice(0, 500));
     }
+    if (process.env.CRM_DEBUG) {
+      const { appendFileSync } = await import("node:fs");
+      for (const [i, c] of calls.entries()) {
+        appendFileSync("crm-tool-log.txt", `${c.functionCall!.name} ${JSON.stringify(c.functionCall!.args ?? {})} -> ${JSON.stringify(outs[i]).slice(0, 800)}\n`);
+      }
+    }
+    const fnParts = calls.map((c, i) => ({ functionResponse: { name: c.functionCall!.name, response: { result: outs[i] } } }));
     contents.push({ role: "user", parts: fnParts });
   }
   // Estourou o limite de rodadas: resume com o que já foi coletado em vez de desistir.

@@ -463,9 +463,35 @@ export type StaffAction =
   | {
       kind: "complete_task";
       taskRef: string | null;
+    }
+  | {
+      kind: "lead";
+      clientName: string;
+      clientPhone: string | null;
+      interest: string | null;
+      notes: string | null;
+    }
+  | {
+      kind: "deal";
+      title: string;
+      clientName: string | null;
+      value: string | null;
+      stage: string | null;
+      notes: string | null;
+    }
+  | {
+      kind: "deal_stage";
+      dealRef: string;
+      stage: string;
+    }
+  | {
+      kind: "reschedule_task";
+      taskRef: string;
+      datetimeIso: string | null;
+      datetimeText: string | null;
     };
 
-const STAFF_INTENT = /(agenda(r|i)?\s+(uma\s+)?visita|marca(r|do|que)?\s+(uma\s+)?visita|cadastra(r|do|i)?\s+((um[ao]?|[oa])\s+)?(cliente|lead)|registra(r)?\s+((um[ao]?|[oa])\s+)?(cliente|lead)|cria(r)?\s+(uma\s+)?(tarefa|visita)|conclui(r|do)?\s+(a\s+)?tarefa|marca(r|que|do)?\s+.{0,30}como\s+(feita|conclu[ií]da|pronta)|finaliza(r)?\s+(a\s+)?tarefa|fechou?\s+(a\s+)?tarefa|dei?\s+baixa|conclui(r|do)?\s+(a\s+)?(visita|consultoria|follow|fup))/i;
+const STAFF_INTENT = /(agenda(r|i)?\s+(uma\s+)?visita|marca(r|do|que)?\s+(uma\s+)?visita|cadastra(r|do|i)?\s+((um[ao]?|[oa])\s+)?(cliente|lead)|registra(r)?\s+((um[ao]?|[oa])\s+)?(cliente|lead)|cria(r)?\s+((um[ao]?|[oa])\s+)?(tarefa|visita|lead|neg[óo]cio)|abre?\s+(um\s+)?neg[óo]cio|muda(r|que)?\s+.{0,40}(etapa|est[áa]gio|stage)|passa(r|que)?\s+.{0,40}(pra|para)\s+.{0,30}(etapa|est[áa]gio|ganho|perdido|proposta|negocia[çc][ãa]o)|marca(r|que|do)?\s+.{0,40}como\s+(ganh[oa]|perdid[oa]|feita|conclu[ií]da|pronta)|conclui(r|do)?\s+(a\s+)?tarefa|finaliza(r)?\s+(a\s+)?tarefa|fechou?\s+(a\s+)?tarefa|dei?\s+baixa|conclui(r|do)?\s+(a\s+)?(visita|consultoria|follow|fup)|remarca(r|que)?\s+(a\s+)?tarefa|remarca(r|que)?\s+(a\s+)?visita|adie?\s+(a\s+)?tarefa|muda(r|que)?\s+(o\s+)?prazo|empurra(r)?\s+(a\s+)?tarefa)/i;
 
 export function detectStaffIntent(text: string): boolean {
   return STAFF_INTENT.test(text);
@@ -475,7 +501,7 @@ const EXTRACTION_PROMPT = `Você extrai dados estruturados de pedidos de correto
 
 Classifique o pedido e extraia os campos. Responda SOMENTE com JSON válido neste formato:
 {
-  "kind": "visit" | "client" | "complete_task" | "none",
+  "kind": "visit" | "client" | "lead" | "deal" | "deal_stage" | "reschedule_task" | "complete_task" | "none",
   "clientName": string | null,
   "clientPhone": string | null,
   "property": string | null,
@@ -483,12 +509,17 @@ Classifique o pedido e extraia os campos. Responda SOMENTE com JSON válido nest
   "datetimeIso": string | null,
   "interest": string | null,
   "notes": string | null,
-  "taskRef": string | null
+  "taskRef": string | null,
+  "title": string | null,
+  "dealRef": string | null,
+  "stage": string | null,
+  "value": string | null
 }
 
 Regras:
-- "visit" = agendar/marcar visita. "client" = cadastrar cliente/lead. "complete_task" = concluir/marcar como feita uma tarefa ou visita existente. "none" = outro assunto.
+- "visit" = agendar/marcar visita. "client" = cadastrar contato/cliente. "lead" = cadastrar lead. "deal" = criar/abrir negócio. "deal_stage" = mudar etapa de um negócio ("passa o negócio X pra proposta", "marca como ganho/perdido"). "reschedule_task" = remarcar/adiar tarefa ou mudar prazo. "complete_task" = concluir/marcar como feita uma tarefa ou visita existente. "none" = outro assunto.
 - taskRef: número da tarefa (#123) ou trecho do título/cliente que identifica a tarefa (ex: "visita da valquíria" → "valquíria").
+- dealRef: número ou título do negócio. stage: nome da etapa pedida (ex: "proposta", "ganho", "perdido", "negociação"). value: valor em R$ se citado.
 - datetimeIso: converta data/hora mencionada para ISO 8601 com fuso -03:00 (America/Sao_Paulo). Data de referência (hoje): %TODAY%. Se não der pra converter, use null e preserve datetimeText.
 - clientPhone: só dígitos com DDD se informado.
 - property: nome/ref do empreendimento se citado.
@@ -523,6 +554,36 @@ export async function extractStaffAction(text: string): Promise<StaffAction | nu
     if (parsed.kind === "complete_task") {
       return { kind: "complete_task", taskRef: (parsed.taskRef as string) ?? null };
     }
+    if (parsed.kind === "lead" && typeof parsed.clientName === "string" && parsed.clientName.trim()) {
+      return {
+        kind: "lead",
+        clientName: parsed.clientName.trim(),
+        clientPhone: (parsed.clientPhone as string) ?? null,
+        interest: (parsed.interest as string) ?? null,
+        notes: (parsed.notes as string) ?? null,
+      };
+    }
+    if (parsed.kind === "deal" && (typeof parsed.title === "string" || typeof parsed.clientName === "string")) {
+      return {
+        kind: "deal",
+        title: ((parsed.title as string) ?? parsed.clientName as string ?? "").trim() || "Novo negócio",
+        clientName: (parsed.clientName as string) ?? null,
+        value: (parsed.value as string) ?? null,
+        stage: (parsed.stage as string) ?? null,
+        notes: (parsed.notes as string) ?? null,
+      };
+    }
+    if (parsed.kind === "deal_stage" && parsed.dealRef && parsed.stage) {
+      return { kind: "deal_stage", dealRef: String(parsed.dealRef), stage: String(parsed.stage) };
+    }
+    if (parsed.kind === "reschedule_task" && parsed.taskRef) {
+      return {
+        kind: "reschedule_task",
+        taskRef: String(parsed.taskRef),
+        datetimeIso: (parsed.datetimeIso as string) ?? null,
+        datetimeText: (parsed.datetimeText as string) ?? null,
+      };
+    }
     if (parsed.kind === "client" && typeof parsed.clientName === "string" && parsed.clientName.trim()) {
       return {
         kind: "client",
@@ -539,6 +600,28 @@ export async function extractStaffAction(text: string): Promise<StaffAction | nu
 }
 
 function describeAction(action: StaffAction, staffName: string): string {
+  if (action.kind === "lead") {
+    const phone = action.clientPhone ? ` (${action.clientPhone})` : "";
+    const interest = action.interest ? ` — interesse: ${action.interest}` : "";
+    return `📋 Cadastrar LEAD ${action.clientName}${phone}${interest}.\n\nConfirma? (responde "sim" ou corrige)`;
+  }
+  if (action.kind === "deal") {
+    const parts = [
+      `📋 Criar NEGÓCIO "${action.title}"`,
+      action.clientName ? ` — cliente: ${action.clientName}` : "",
+      action.value ? ` — valor: ${action.value}` : "",
+      action.stage ? ` — etapa: ${action.stage}` : "",
+      ` — responsável: ${staffName}`,
+    ].join("");
+    return `${parts}.\n\nConfirma? (responde "sim" ou corrige)`;
+  }
+  if (action.kind === "deal_stage") {
+    return `📋 Mudar negócio "${action.dealRef}" para a etapa "${action.stage}".\n\nConfirma? (responde "sim" ou corrige)`;
+  }
+  if (action.kind === "reschedule_task") {
+    const when = action.datetimeText ?? action.datetimeIso ?? "sem nova data definida";
+    return `📋 Remarcar tarefa "${action.taskRef}" para ${when}.\n\nConfirma? (responde "sim" ou corrige)`;
+  }
   if (action.kind === "complete_task") {
     const ref = action.taskRef ? ` "${action.taskRef}"` : "";
     return `📋 Concluir tarefa${ref} — responsável: ${staffName}.\n\nConfirma? (responde "sim" ou corrige)`;
@@ -608,6 +691,95 @@ export async function executeStaffAction(action: StaffAction, staff: StaffMember
     });
     const taskId = (result as { task?: { id?: number } })?.task?.id ?? (result as { id?: number })?.id;
     return `✅ Visita criada no Bitrix (tarefa #${taskId ?? "?"}), atribuída a ${staff.name}.`;
+  }
+
+  if (action.kind === "lead") {
+    const leadId = await b24Call<number>("crm.lead.add", {
+      fields: {
+        TITLE: `Lead - ${action.clientName}`,
+        NAME: action.clientName.split(" ")[0],
+        LAST_NAME: action.clientName.split(" ").slice(1).join(" ") || undefined,
+        ASSIGNED_BY_ID: Number(staff.bitrixId),
+        COMMENTS: [action.interest ? `Interesse: ${action.interest}` : null, action.notes, `Cadastrado por ${staff.name} via WhatsApp/IA`].filter(Boolean).join("\n"),
+        ...(action.clientPhone ? { FM: { PHONE: { n1: { VALUE: action.clientPhone, VALUE_TYPE: "MOBILE" } } } } : {}),
+      },
+    });
+    return `✅ Lead "${action.clientName}" criado no Bitrix (ID ${leadId}), atribuído a ${staff.name}.`;
+  }
+
+  if (action.kind === "deal") {
+    let contactId: number | null = null;
+    if (action.clientName) {
+      const list = await b24Call<Array<{ ID: string }>>("crm.contact.list", {
+        filter: { "%NAME": action.clientName },
+        select: ["ID"],
+      }).catch(() => null);
+      contactId = Number(Array.isArray(list) ? list[0]?.ID : undefined) || null;
+    }
+    const dealId = await b24Call<number>("crm.deal.add", {
+      fields: {
+        TITLE: action.title,
+        ASSIGNED_BY_ID: Number(staff.bitrixId),
+        ...(contactId ? { CONTACT_ID: contactId } : {}),
+        ...(action.value ? { OPPORTUNITY: String(action.value).replace(/[^\d.,]/g, "").replace(",", ".") } : {}),
+        COMMENTS: [action.clientName && !contactId ? `Cliente: ${action.clientName}` : null, action.notes, `Criado por ${staff.name} via WhatsApp/IA`].filter(Boolean).join("\n"),
+      },
+    });
+    return `✅ Negócio "${action.title}" criado no Bitrix (ID ${dealId}), atribuído a ${staff.name}.`;
+  }
+
+  if (action.kind === "deal_stage") {
+    const ref = action.dealRef.replace(/^#/, "").trim();
+    let deal: { ID?: string; TITLE?: string } | null = null;
+    if (/^\d+$/.test(ref)) {
+      deal = await b24Call<{ ID: string; TITLE: string }>("crm.deal.get", { id: Number(ref) }).catch(() => null);
+    } else {
+      const list = await b24Call<Array<{ ID: string; TITLE: string }>>("crm.deal.list", {
+        filter: { "%TITLE": ref },
+        select: ["ID", "TITLE"],
+      }).catch(() => null);
+      if (Array.isArray(list) && list.length > 1) {
+        return `Encontrei ${list.length} negócios com "${ref}":\n${list.slice(0, 6).map((d) => `• #${d.ID} ${d.TITLE.slice(0, 50)}`).join("\n")}\n\nMe diz o número (#) do que você quer alterar.`;
+      }
+      deal = list?.[0] ?? null;
+    }
+    if (!deal) return `Não encontrei negócio com "${ref}". Me manda o número (#) dele que eu altero.`;
+
+    const statuses = await b24Call<Array<{ ENTITY_ID: string; STATUS_ID: string; NAME: string }>>("crm.status.list", {
+      filter: { ENTITY_ID: "DEAL_STAGE" },
+    }).catch(() => null);
+    const wanted = norm(action.stage);
+    const stage = Array.isArray(statuses)
+      ? statuses.find((s) => norm(s.NAME).includes(wanted) || wanted.includes(norm(s.NAME)))
+      : null;
+    if (!stage) {
+      const fallback = /ganh|won|sucesso|fechou|fechado|vendeu|venda/.test(wanted) ? "WON" : /perd|lose|lost|fracass/.test(wanted) ? "LOSE" : null;
+      if (!fallback) {
+        return `Não achei a etapa "${action.stage}" no funil. Etapas disponíveis: ${Array.isArray(statuses) ? statuses.slice(0, 10).map((s) => s.NAME).join(", ") : "?"}.`;
+      }
+      await b24Call("crm.deal.update", { id: Number(deal.ID), fields: { STAGE_ID: fallback } });
+      return `✅ Negócio #${deal.ID} "${deal.TITLE}" movido para "${fallback === "WON" ? "GANHO" : "PERDIDO"}".`;
+    }
+    await b24Call("crm.deal.update", { id: Number(deal.ID), fields: { STAGE_ID: stage.STATUS_ID } });
+    return `✅ Negócio #${deal.ID} "${deal.TITLE}" movido para a etapa "${stage.NAME}".`;
+  }
+
+  if (action.kind === "reschedule_task") {
+    const ref = action.taskRef.replace(/^#/, "").trim();
+    const deadline = action.datetimeIso;
+    if (!deadline) return `Não consegui entender a nova data pra "${ref}". Me fala o dia e hora (ex: "amanhã 15h" ou "sexta 10:30").`;
+    let task: B24Task | null = null;
+    if (/^\d+$/.test(ref)) {
+      const found = await b24Call<{ task?: B24Task } | B24Task>("tasks.task.get", { taskId: Number(ref), select: ["ID", "TITLE"] }).catch(() => null);
+      task = (found as { task?: B24Task })?.task ?? (found as B24Task | null);
+    } else {
+      const all = await queryTasks({ responsibleId: staff.bitrixId }, 500);
+      const matches = all.filter((t) => norm(String(t.title ?? t.TITLE ?? "")).includes(norm(ref)));
+      task = matches[0] ?? null;
+    }
+    if (!task) return `Não encontrei a tarefa "${ref}". Me manda o número (#) dela que eu remarco.`;
+    await b24Call("tasks.task.update", { taskId: Number(task.id ?? task.ID), fields: { DEADLINE: deadline } });
+    return `✅ Tarefa #${task.id ?? task.ID} "${task.title ?? task.TITLE}" remarcada para ${action.datetimeText ?? deadline}.`;
   }
 
   const contactId = await createCrmContact({
