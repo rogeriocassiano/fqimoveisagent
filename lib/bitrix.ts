@@ -670,12 +670,18 @@ export async function confirmMessageFor(action: StaffAction, staffName: string):
   if (action.kind === "deal_stage") {
     try {
       const ref = action.dealRef.replace(/^#/, "").trim();
-      const deal = /^\d+$/.test(ref)
-        ? await b24Call<{ ID: string; TITLE: string; STAGE_ID: string }>("crm.deal.get", { id: Number(ref) }).catch(() => null)
-        : null;
+      let deal: { ID: string; TITLE: string; STAGE_ID: string } | null = null;
+      if (/^\d+$/.test(ref)) {
+        deal = await b24Call<{ ID: string; TITLE: string; STAGE_ID: string }>("crm.deal.get", { id: Number(ref) }).catch(() => null);
+      } else {
+        const list = await b24Call<Array<{ ID: string; TITLE: string; STAGE_ID: string }>>("crm.deal.list", {
+          filter: { "%TITLE": ref }, select: ["ID", "TITLE", "STAGE_ID"],
+        }).catch(() => null);
+        if (Array.isArray(list) && list.length === 1) deal = list[0];
+      }
       if (deal?.STAGE_ID) {
         const statuses = await listDealStages();
-        const cur = statuses?.find((s) => s.STATUS_ID === deal.STAGE_ID)?.NAME ?? deal.STAGE_ID;
+        const cur = statuses.find((s) => s.STATUS_ID === deal!.STAGE_ID)?.NAME ?? deal.STAGE_ID;
         return `📋 Mudar negócio #${deal.ID} "${deal.TITLE}": etapa atual "${cur}" → "${action.stage}".\n\nConfirma? (responde "sim" ou corrige)`;
       }
     } catch { /* cai na mensagem simples */ }
