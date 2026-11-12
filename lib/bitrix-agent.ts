@@ -261,7 +261,7 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
     { role: "user", parts: [{ text: `Corretor: ${staff?.name ?? "desconhecido"} (Bitrix ID ${staff?.bitrixId ?? "?"})\nData/hora atual: ${hoje}\nPergunta: ${message}` }] },
   ];
 
-  for (let turn = 0; turn < 8; turn++) {
+  for (let turn = 0; turn < 12; turn++) {
     let res!: Awaited<ReturnType<typeof ai.models.generateContent>>;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -291,5 +291,8 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
     }
     contents.push({ role: "user", parts: fnParts });
   }
-  return "Consultei muitos dados e ainda não consegui fechar a resposta. Pode detalhar melhor o que você quer?";
+  // Estourou o limite de rodadas: resume com o que já foi coletado em vez de desistir.
+  contents.push({ role: "user", parts: [{ text: "Responda agora com os dados que você JÁ coletou. Se algum número ficou incerto, diga qual é o total parcial e que pode haver mais." }] });
+  const final = await ai.models.generateContent({ model: env.GEMINI_MODEL, contents, config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2 } });
+  return final.text?.trim() || "Consultei muitos dados e ainda não consegui fechar a resposta. Pode detalhar melhor o que você quer?";
 }
