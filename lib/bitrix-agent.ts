@@ -226,7 +226,20 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
         return { error: `Método não permitido para leitura dinâmica: ${method}. Use apenas *.list ou *.get.` };
       }
       const params: Record<string, unknown> = {};
-      if (args.filter && typeof args.filter === "object") params.filter = args.filter;
+      if (args.filter && typeof args.filter === "object") {
+        // Campos datetime do Bitrix (CLOSED_DATE, DEADLINE, CREATED_DATE...) só
+        // comparam certo com hora completa — "2026-11-11" cru retorna 0.
+        const filter = args.filter as Record<string, unknown>;
+        const fixed: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(filter)) {
+          if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && /DATE|DEADLINE|TIME/i.test(k)) {
+            fixed[k] = k.startsWith("<") ? `${v}T23:59:59-03:00` : `${v}T00:00:00-03:00`;
+          } else {
+            fixed[k] = v;
+          }
+        }
+        params.filter = fixed;
+      }
       if (Array.isArray(args.select)) params.select = args.select;
       if (args.order && typeof args.order === "object") params.order = args.order;
       const explicitStart = Number.isFinite(Number(args.start));
