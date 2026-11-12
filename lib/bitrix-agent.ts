@@ -1,7 +1,7 @@
 import { Type, type Tool } from "@google/genai";
 import { genaiClient } from "./genai-client";
 import { serverEnv } from "./env";
-import { b24Call, listBitrixUsers, queryTasks, staffCandidates, type B24Task, type StaffMember } from "./bitrix";
+import { b24Call, b24CallWithTotal, listBitrixUsers, queryTasks, staffCandidates, type B24Task, type StaffMember } from "./bitrix";
 
 /**
  * Agente CRM com function calling: o Gemini decide quais métodos do Bitrix24
@@ -89,8 +89,8 @@ const CRM_TOOLS: Tool[] = [
             filter: { type: Type.OBJECT, description: "Filtros do Bitrix, ex.: {'%TITLE':'Simone'} ou {'>=DATE_CREATE':'2026-11-01','<=DATE_CREATE':'2026-11-30'}." },
             select: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Campos a retornar (ex.: ['ID','TITLE','DATE_CREATE'])." },
             order: { type: Type.OBJECT, description: "Ordenação, ex.: {'DATE_CREATE':'desc'}." },
-            start: { type: Type.INTEGER, description: "Paginação (múltiplos de 50). Omita para paginar automaticamente e obter o total real." },
-            paginate: { type: Type.BOOLEAN, description: "Padrão true para .list: busca todas as páginas (até 500) e retorna o total real." },
+            start: { type: Type.INTEGER, description: "Paginação (múltiplos de 50) para ver mais itens." },
+            paginate: { type: Type.BOOLEAN, description: "true = busca todas as páginas (até 500 itens). Desnecessário para saber o total: o campo 'total' já vem da API em qualquer chamada .list." },
           },
           required: ["method"],
         },
@@ -254,8 +254,9 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
       const explicitStart = Number.isFinite(Number(args.start));
       if (explicitStart) params.start = Number(args.start);
 
+      // Paginação explícita só quando o modelo pede todos os itens.
       const isList = /\.list$/i.test(method);
-      const paginate = args.paginate !== false && isList && !explicitStart;
+      const paginate = args.paginate === true && isList && !explicitStart;
       if (paginate) {
         const all: unknown[] = [];
         for (let start = 0; start < 500; start += 50) {
@@ -268,9 +269,13 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
         const json = JSON.stringify(payload);
         return json.length > 20000 ? { ...payload, items: undefined, truncated: true, items_preview: all.slice(0, 20), note: `total real=${all.length}; amostra cortada` } : payload;
       }
-      const result = await b24Call<unknown>(method, params).catch((e) => ({ error: e instanceof Error ? e.message : "erro na API" }));
-      const json = JSON.stringify(result);
-      return json.length > 20000 ? { truncated: true, note: "Resultado muito grande — refine o filtro/select.", preview: json.slice(0, 20000) } : result;
+      // Caminho rápido: uma página + o "total" oficial que o Bitrix já retorna.
+      const page = await b24CallWithTotal<unknown>(method, params).catch((e) => ({ error: e instanceof Error ? e.message : "erro na API" }));
+      if ("error" in page) return page;
+      const items = Array.isArray(page.result) ? page.result : (page.result && typeof page.result === "object" ? ((page.result as Record<string, unknown>).tasks ?? (page.result as Record<string, unknown>).items ?? page.result) : page.result);
+      const payload = { method, applied_filter: params.filter ?? null, total: page.total ?? (Array.isArray(items) ? items.length : null), items };
+      const json = JSON.stringify(payload);
+      return json.length > 20000 ? { ...payload, items: undefined, truncated: true, items_preview: (Array.isArray(items) ? items : [items]).slice(0, 20), note: `total real=${payload.total}; amostra cortada` } : payload;
     }
     default:
       return { error: `Ferramenta desconhecida: ${name}` };

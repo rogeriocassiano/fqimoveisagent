@@ -49,11 +49,28 @@ export async function b24Call<T>(method: string, params: Record<string, unknown>
     body: JSON.stringify(params),
     signal: AbortSignal.timeout(B24_TIMEOUT_MS),
   });
-  const data = (await res.json().catch(() => null)) as { result?: T; error?: string; error_description?: string } | null;
+  const data = (await res.json().catch(() => null)) as { result?: T; total?: number; error?: string; error_description?: string } | null;
   if (!res.ok || data?.error) {
     throw new Error(`Bitrix ${method} falhou: ${data?.error_description ?? data?.error ?? res.status}`);
   }
   return data?.result as T;
+}
+
+/** Igual b24Call, mas retorna também o campo `total` que o Bitrix manda nas listas. */
+export async function b24CallWithTotal<T>(method: string, params: Record<string, unknown> = {}): Promise<{ result: T; total: number | null }> {
+  const base = process.env.B24_WEBHOOK_URL;
+  if (!base) throw new Error("B24_WEBHOOK_URL não configurada");
+  const res = await fetch(`${base.replace(/\/$/, "")}/${method}.json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(B24_TIMEOUT_MS),
+  });
+  const data = (await res.json().catch(() => null)) as { result?: T; total?: number; error?: string; error_description?: string } | null;
+  if (!res.ok || data?.error) {
+    throw new Error(`Bitrix ${method} falhou: ${data?.error_description ?? data?.error ?? res.status}`);
+  }
+  return { result: data?.result as T, total: typeof data?.total === "number" ? data.total : null };
 }
 
 export async function listBitrixUsers(): Promise<B24User[]> {
