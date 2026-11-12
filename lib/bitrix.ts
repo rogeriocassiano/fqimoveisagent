@@ -295,7 +295,7 @@ async function taskLines(tasks: B24Task[]): Promise<string> {
 /** Perguntas de CRM/tarefas que disparam consulta ao Bitrix. Amplo de propósito:
  *  o contexto só é injetado para usuários autenticados/equipe — o gate é a identidade, não a frase. */
 export function detectCrmQueryIntent(text: string): boolean {
-  return /(tarefa|atrasad|vencid|pipeline|funil|neg[óo]cio|deal|lead|contato|cliente|crm|bitrix|pendente|prazo|agenda|visita|seguidor|follow|corretor|corretora|corretores|vendedor|vendedora|equipe|usu[áa]rio|funcion[áa]rio|empresa|telefone)/i.test(text);
+  return /(tarefa|atrasad|vencid|pipeline|funil|neg[óo]cio|deal|lead|contato|cliente|crm|bitrix|pendente|prazo|agenda|visita|seguidor|follow|corretor|corretora|corretores|vendedor|vendedora|equipe|usu[áa]rio|funcion[áa]rio|empresa|telefone|proposta|or[çc]amento|cota[çc]|atividade|liga[çc]|reuni[ãa]o|departamento|grupo|produto|cat[áa]logo|etapa|est[áa]gio|stage|hist[óo]rico|coment[áa]rio|checklist|tempo gasto|calend[áa]rio|fatura|invoice|quote|requisito|endere[çc]o|ganh|perdid|faturamento|vendido|fechad)/i.test(text);
 }
 
 /** Monta contexto com dados REAIS do Bitrix para a IA responder a pergunta da equipe. */
