@@ -136,13 +136,22 @@ async function taskFilters(args: FnArgs) {
   if (args.title_contains) extra["%TITLE"] = String(args.title_contains);
   if (args.status === "closed") f.onlyClosed = true;
   if (args.status === "all") f.includeClosed = true;
+  const toDate = (v: unknown, end: boolean) => {
+    const s = String(v);
+    return new Date(/T/.test(s) ? s : `${s}T${end ? "23:59:59" : "00:00:00"}-03:00`);
+  };
   if (args.overdue) f.deadlineBefore = new Date();
-  if (args.due_before) f.deadlineBefore = new Date(`${args.due_before}T23:59:59-03:00`);
-  if (args.due_after) f.deadlineAfter = new Date(`${args.due_after}T00:00:00-03:00`);
-  if (args.created_after) extra[">=CREATED_DATE"] = `${args.created_after}T00:00:00-03:00`;
-  if (args.created_before) extra["<=CREATED_DATE"] = `${args.created_before}T23:59:59-03:00`;
-  if (args.closed_after) extra[">=CLOSED_DATE"] = `${args.closed_after}T00:00:00-03:00`;
-  if (args.closed_before) extra["<=CLOSED_DATE"] = `${args.closed_before}T23:59:59-03:00`;
+  if (args.due_before) f.deadlineBefore = toDate(args.due_before, true);
+  if (args.due_after) f.deadlineAfter = toDate(args.due_after, false);
+  const dt = (v: unknown, end: boolean) => {
+    const s = String(v);
+    if (!/T/.test(s)) return `${s}T${end ? "23:59:59" : "00:00:00"}-03:00`;
+    return /([+-]\d{2}:\d{2}|Z)$/.test(s) ? s : `${s}-03:00`;
+  };
+  if (args.created_after) extra[">=CREATED_DATE"] = dt(args.created_after, false);
+  if (args.created_before) extra["<=CREATED_DATE"] = dt(args.created_before, true);
+  if (args.closed_after) extra[">=CLOSED_DATE"] = dt(args.closed_after, false);
+  if (args.closed_before) extra["<=CLOSED_DATE"] = dt(args.closed_before, true);
   if (Object.keys(extra).length) f.extraFilter = extra;
   if (args.responsible_name) {
     const candidates = await staffCandidates(String(args.responsible_name));
@@ -305,6 +314,11 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
     const fnParts = [] as Record<string, unknown>[];
     for (const c of calls) {
       const out = await executeTool(c.functionCall!.name, c.functionCall!.args ?? {}, users).catch((e) => ({ error: e instanceof Error ? e.message : "erro" }));
+      console.error("crm_tool_call", c.functionCall!.name, JSON.stringify(c.functionCall!.args ?? {}), "->", JSON.stringify(out).slice(0, 500));
+      if (process.env.CRM_DEBUG) {
+        const { appendFileSync } = await import("node:fs");
+        appendFileSync("crm-tool-log.txt", `${c.functionCall!.name} ${JSON.stringify(c.functionCall!.args ?? {})} -> ${JSON.stringify(out).slice(0, 800)}\n`);
+      }
       fnParts.push({ functionResponse: { name: c.functionCall!.name, response: { result: out } } });
     }
     contents.push({ role: "user", parts: fnParts });
