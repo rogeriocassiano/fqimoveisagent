@@ -657,10 +657,11 @@ function describeAction(action: StaffAction, staffName: string): string {
 
 let dealStagesCache: { ts: number; stages: Array<{ STATUS_ID: string; NAME: string }> } | null = null;
 
-/** Etapas do funil de negócios, com cache de 10min (mudam raramente). */
+/** Etapas de todos os funis de negócios (DEAL_STAGE + DEAL_STAGE_N), com cache de 10min. */
 async function listDealStages(): Promise<Array<{ STATUS_ID: string; NAME: string }>> {
   if (dealStagesCache && Date.now() - dealStagesCache.ts < USERS_CACHE_TTL_MS) return dealStagesCache.stages;
-  const stages = await b24Call<Array<{ STATUS_ID: string; NAME: string }>>("crm.status.list", { filter: { ENTITY_ID: "DEAL_STAGE" } }).catch(() => []);
+  const all = await b24Call<Array<{ ENTITY_ID: string; STATUS_ID: string; NAME: string }>>("crm.status.list", {}).catch(() => []);
+  const stages = (all ?? []).filter((s) => String(s.ENTITY_ID ?? "").startsWith("DEAL_STAGE"));
   dealStagesCache = { ts: Date.now(), stages };
   return stages;
 }
