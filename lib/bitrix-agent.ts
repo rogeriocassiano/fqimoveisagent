@@ -86,9 +86,9 @@ const CRM_TOOLS: Tool[] = [
           type: Type.OBJECT,
           properties: {
             method: { type: Type.STRING, description: "Nome do método REST, ex.: 'crm.deal.list', 'crm.activity.list'." },
-            filter: { type: Type.OBJECT, description: "Filtros do Bitrix, ex.: {'%TITLE':'Simone'} ou {'>=DATE_CREATE':'2026-11-01','<=DATE_CREATE':'2026-11-30'}." },
+            filter: { type: Type.STRING, description: "Filtros do Bitrix como string JSON. Escreva exatamente: {\">=DATE_CREATE\":\"2026-11-01\",\"<=DATE_CREATE\":\"2026-11-30\"} ou {\"%TITLE\":\"Simone\"}. Chaves SEM crases." },
             select: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Campos a retornar (ex.: ['ID','TITLE','DATE_CREATE'])." },
-            order: { type: Type.OBJECT, description: "Ordenação, ex.: {'DATE_CREATE':'desc'}." },
+            order: { type: Type.STRING, description: "Ordenação como string JSON, ex.: {\"DATE_CREATE\":\"desc\"}." },
             start: { type: Type.INTEGER, description: "Paginação (múltiplos de 50) para ver mais itens." },
             paginate: { type: Type.BOOLEAN, description: "true = busca todas as páginas (até 500 itens). Desnecessário para saber o total: o campo 'total' já vem da API em qualquer chamada .list." },
           },
@@ -111,6 +111,7 @@ Despojado e profissional, fala pt-BR. REGRAS:
   • Docs: disk.storage.getlist, lists.get (listas de trabalho — pode dar ACCESS_DENIED em alguns casos)
   • Comunicação: mailservice.list, im.recent.list, telephony.externalcall.searchcrmentities
   • Filtros de data comuns: >=DATE_CREATE / <=DATE_CREATE (criação), >=CLOSED_DATE / <=CLOSED_DATE (conclusão), >=DATE_MODIFY (alteração), >=DEADLINE (prazo de tarefa)
+  • ATENÇÃO: chaves de filtro vão SEM crases e SEM espaços — escreva ">=DATE_CREATE" (nunca coloque a chave entre crases). Se o resultado vier com total gigante e "applied_filter" mostrar chave estranha, refaça a chamada corrigida.
 - SEMÂNTICA DO BITRIX (importante para não responder errado):
   • "Visita realizada/feita" = TAREFA concluída (status=closed) com "visita" no título e closed_after/before no período. "Visita agendada" = tarefa aberta com "visita" no título.
   • "Novos negócios/clientes/leads no mês" = filtro de criação: query_bitrix crm.deal.list (ou contact/lead) com filter {">=DATE_CREATE":"YYYY-MM-01","<=DATE_CREATE":"YYYY-MM-último"}.
@@ -235,14 +236,28 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
         return { error: `Método não permitido para leitura dinâmica: ${method}. Use apenas *.list ou *.get.` };
       }
       const params: Record<string, unknown> = {};
-      if (args.filter && typeof args.filter === "object") {
+      let filterObj: Record<string, unknown> | null = null;
+      if (typeof args.filter === "string" && args.filter.trim()) {
+        try {
+          filterObj = JSON.parse(args.filter);
+        } catch {
+          return { error: "Filtro JSON inválido — mande como string JSON, ex.: {\">=DATE_CREATE\":\"2026-11-01\"}" };
+        }
+      } else if (args.filter && typeof args.filter === "object") {
+        filterObj = args.filter as Record<string, unknown>;
+      }
+      if (filterObj) {
         // Campos datetime do Bitrix (CLOSED_DATE, DEADLINE, CREATED_DATE...) só
         // comparam certo com hora completa — "2026-11-11" cru retorna 0.
-        const filter = args.filter as Record<string, unknown>;
+        const filter = filterObj;
         const fixed: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(filter)) {
+        for (const [rawKey, v] of Object.entries(filter)) {
+          // O modelo às vezes manda crases/espaços na chave ("`>=DATE_CREATE`") — o Bitrix ignora e a query volta sem filtro.
+          const k = rawKey.replace(/[`'"\\\s]/g, "");
           if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && /DATE|DEADLINE|TIME/i.test(k)) {
             fixed[k] = k.startsWith("<") ? `${v}T23:59:59-03:00` : `${v}T00:00:00-03:00`;
+          } else if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(v) && /DATE|DEADLINE|TIME/i.test(k) && !/([+-]\d{2}:\d{2}|Z)$/.test(v)) {
+            fixed[k] = `${v}-03:00`;
           } else {
             fixed[k] = v;
           }
@@ -250,7 +265,9 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
         params.filter = fixed;
       }
       if (Array.isArray(args.select)) params.select = args.select;
-      if (args.order && typeof args.order === "object") params.order = args.order;
+      if (typeof args.order === "string" && args.order.trim()) {
+        try { params.order = JSON.parse(args.order); } catch { /* ignora order inválida */ }
+      } else if (args.order && typeof args.order === "object") params.order = args.order;
       const explicitStart = Number.isFinite(Number(args.start));
       if (explicitStart) params.start = Number(args.start);
 
@@ -299,7 +316,7 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
       try {
         res = await ai.models.generateContent({
           model: env.GEMINI_MODEL,
-          contents,
+          contents: contents as never,
           config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2, tools: CRM_TOOLS },
         });
         break;
@@ -330,6 +347,6 @@ export async function answerWithBitrixTools(message: string, staff: StaffMember 
   }
   // Estourou o limite de rodadas: resume com o que já foi coletado em vez de desistir.
   contents.push({ role: "user", parts: [{ text: "Responda agora com os dados que você JÁ coletou. Se algum número ficou incerto, diga qual é o total parcial e que pode haver mais." }] });
-  const final = await ai.models.generateContent({ model: env.GEMINI_MODEL, contents, config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2 } });
+  const final = await ai.models.generateContent({ model: env.GEMINI_MODEL, contents: contents as never, config: { systemInstruction: SYSTEM_PROMPT, temperature: 0.2 } });
   return final.text?.trim() || "Consultei muitos dados e ainda não consegui fechar a resposta. Pode detalhar melhor o que você quer?";
 }

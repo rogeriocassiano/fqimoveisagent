@@ -10,7 +10,7 @@ for (const f of [".env.local", ".env"]) {
   } catch { /* ignore */ }
 }
 
-const q = process.env.CRM_TEST_Q ?? "quantas visitas foram realizadas hoje?";
+const q = process.env.CRM_TEST_Q ?? "quantos novos negocios foram incluidos em novembro?";
 
 describe("manual", () => {
   it(q, async () => {
