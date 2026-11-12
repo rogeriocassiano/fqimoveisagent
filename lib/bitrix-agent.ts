@@ -118,7 +118,8 @@ Despojado e profissional, fala pt-BR. REGRAS:
   • Tarefas atrasadas = overdue=true. Tarefas criadas no mês = created_after/before.
   • Datas no fuso America/Sao_Paulo; use a data/hora atual informada para montar os intervalos.
 - Se um nome de pessoa for ambíguo, apresente as opções em vez de chutar.
-- Sempre informe o TOTAL quando existir (campo "total" do resultado) — NUNCA conte os itens da amostra para estimar o total; eles são só os primeiros N. Se precisar do número exato e o total não vier, chame count_tasks ou query_bitrix com filtro mais específico.
+- Sempre informe o TOTAL quando existir (campo "total" do resultado) — NUNCA conte os itens da amostra para estimar o total; eles são só os primeiros N. Se precisar do número exato e o total não vier, chame count_tasks ou query_bitrix com filtro mais específico. O número que você responder DEVE ser exatamente o "total" retornado — nunca some na cabeça nem arredonde.
+- PERÍODO FIEL: use EXATAMENTE o intervalo que o usuário pediu. "Novembro" = 01/11 a 30/11 (mês inteiro), não "até hoje". "Essa semana" = segunda a domingo da semana atual. "Semana passada" = a semana anterior completa. "Hoje" = o dia de hoje inteiro (00:00–23:59). "Amanhã" = o dia de amanhã inteiro. Monte os filtros de data de acordo — created/closed/due — conforme o sentido da pergunta (criado em X = DATE_CREATE; realizado/concluído em X = CLOSED_DATE; agendado/prazo em X = DEADLINE).
 - Quando uma chamada retornar erro ou vazio, tente outra abordagem (outra ferramenta, outro filtro) antes de desistir.
 - Para CRIAR, CONCLUIR ou ALTERAR registros você não executa direto: oriente o corretor a pedir o comando (ex.: "agenda visita com a Ana sábado 14h", "cadastra o cliente João", "conclui a tarefa 123") — o sistema pede confirmação antes de gravar.
 - Responda objetivo, formatando listas com • e datas curtas (dd/mm).`;
@@ -238,8 +239,9 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
           all.push(...page);
           if (page.length < 50) break;
         }
-        const json = JSON.stringify({ total: all.length, items: all });
-        return json.length > 20000 ? { total: all.length, truncated: true, items: all.slice(0, Math.max(1, Math.floor(all.length * (20000 / json.length)))) } : { total: all.length, items: all };
+        const payload = { method, applied_filter: params.filter ?? null, total: all.length, items: all };
+        const json = JSON.stringify(payload);
+        return json.length > 20000 ? { ...payload, items: undefined, truncated: true, items_preview: all.slice(0, 20), note: `total real=${all.length}; amostra cortada` } : payload;
       }
       const result = await b24Call<unknown>(method, params).catch((e) => ({ error: e instanceof Error ? e.message : "erro na API" }));
       const json = JSON.stringify(result);
