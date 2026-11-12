@@ -296,11 +296,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Contexto de conversa persistente (equipe): resolve "e o dela?", "essa tarefa" ──
-    const convHistory = staff ? await getConvHistory(pendingKey, "wa").catch(() => []) : [];
+    const convHistory = staff ? await getConvHistory(pendingKey).catch(() => []) : [];
     const remember = (reply: string | null) => {
       if (!staff) return;
-      rememberTurn(pendingKey, "wa", agentId, "user", text);
-      if (reply) rememberTurn(pendingKey, "wa", agentId, "model", reply);
+      rememberTurn(pendingKey, "user", text);
+      if (reply) rememberTurn(pendingKey, "model", reply);
     };
 
     // ── Fluxo de equipe: ações pendentes de confirmação no Bitrix ──

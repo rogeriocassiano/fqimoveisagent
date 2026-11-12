@@ -108,17 +108,11 @@ export async function POST(request: Request) {
             const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
             const { getConvHistory, rememberTurn } = await import("@/lib/crm-history");
             const panelKey = `panel:${session.id}`;
-            const history = await getConvHistory(panelKey, "panel").catch(() => []);
+            const history = await getConvHistory(panelKey).catch(() => []);
             const reply = await answerWithBitrixTools(message, staff, history);
             if (reply) {
-              // Usa o agente interno de CRM como dono da conversa (histórico persistente).
-              const db = (await import("@/lib/supabase")).adminDb();
-              const { data: crmAgent } = await db
-                .from("agents").select("id")
-                .eq("organization_id", session.organizationId).ilike("name", "%crm%").limit(1).maybeSingle();
-              const ownerId = (crmAgent?.id as string) ?? (agentId || null);
-              rememberTurn(panelKey, "panel", ownerId, "user", message);
-              rememberTurn(panelKey, "panel", ownerId, "model", reply);
+              rememberTurn(panelKey, "user", message);
+              rememberTurn(panelKey, "model", reply);
               return Response.json({ answer: reply, sources: [], media: [], fileUrl });
             }
           } catch (error) {
