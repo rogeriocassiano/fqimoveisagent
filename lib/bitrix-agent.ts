@@ -121,6 +121,8 @@ Despojado e profissional, fala pt-BR. REGRAS:
 - Sempre informe o TOTAL quando existir (campo "total" do resultado) — NUNCA conte os itens da amostra para estimar o total; eles são só os primeiros N. Se precisar do número exato e o total não vier, chame count_tasks ou query_bitrix com filtro mais específico. O número que você responder DEVE ser exatamente o "total" retornado — nunca some na cabeça nem arredonde.
 - PERÍODO FIEL: use EXATAMENTE o intervalo que o usuário pediu. "Novembro" = 01/11 a 30/11 (mês inteiro), não "até hoje". "Essa semana" = segunda a domingo da semana atual. "Semana passada" = a semana anterior completa. "Hoje" = o dia de hoje inteiro (00:00–23:59). "Amanhã" = o dia de amanhã inteiro. Monte os filtros de data de acordo — created/closed/due — conforme o sentido da pergunta (criado em X = DATE_CREATE; realizado/concluído em X = CLOSED_DATE; agendado/prazo em X = DEADLINE).
 - Quando uma chamada retornar erro ou vazio, tente outra abordagem (outra ferramenta, outro filtro) antes de desistir.
+- ESCOPO: se a pergunta não citar uma pessoa e não disser "minha/eu", responda o total da EQUIPE TODA (sem responsible_name). Se fizer sentido, acrescente também o número do corretor que está perguntando. Nunca filtre pelo corretor por conta própria.
+- "Quantas visitas" (realizadas, agendadas, feitas): use count_tasks com title_contains="visita" + status correto (closed=realizada, open=agendada) + closed_after/before (realizada) ou due_after/before (agendada). Uma chamada resolve — não fique tentando variações.
 - Para CRIAR, CONCLUIR ou ALTERAR registros você não executa direto: oriente o corretor a pedir o comando (ex.: "agenda visita com a Ana sábado 14h", "cadastra o cliente João", "conclui a tarefa 123") — o sistema pede confirmação antes de gravar.
 - Responda objetivo, formatando listas com • e datas curtas (dd/mm).`;
 
@@ -130,12 +132,13 @@ const TASK_STATUS: Record<string, string> = { "1": "nova", "2": "pendente", "3":
 
 async function taskFilters(args: FnArgs) {
   const f: Parameters<typeof queryTasks>[0] = { titleContains: args.title_contains as string | undefined };
+  const extra: Record<string, unknown> = {};
+  if (args.title_contains) extra["%TITLE"] = String(args.title_contains);
   if (args.status === "closed") f.onlyClosed = true;
   if (args.status === "all") f.includeClosed = true;
   if (args.overdue) f.deadlineBefore = new Date();
   if (args.due_before) f.deadlineBefore = new Date(`${args.due_before}T23:59:59-03:00`);
   if (args.due_after) f.deadlineAfter = new Date(`${args.due_after}T00:00:00-03:00`);
-  const extra: Record<string, unknown> = {};
   if (args.created_after) extra[">=CREATED_DATE"] = `${args.created_after}T00:00:00-03:00`;
   if (args.created_before) extra["<=CREATED_DATE"] = `${args.created_before}T23:59:59-03:00`;
   if (args.closed_after) extra[">=CLOSED_DATE"] = `${args.closed_after}T00:00:00-03:00`;
