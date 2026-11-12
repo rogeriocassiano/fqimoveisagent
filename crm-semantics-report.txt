@@ -1,6 +1,54 @@
-PASS #3 verdade=9 | quantas visitas temos agendadas pra amanhã?
->> Fala, Tiago! Amanhã (sexta-feira, 13/11), temos um total de **9 visitas agendadas** na equipe. Desse total, **3 são suas**: * **09:00** - Confirmar visita (ID: 28752) * **10:00** - Visita Agendada - Be All - Elisa (ID: 28824) * **14:15** - Visita Agendada - Residencial Leonardo D
+PASS #1 verdade=3 | quantas visitas foram realizadas hoje?
+>> Fala, Tiago! Beleza? Hoje (12/11) foram realizadas **3 visitas** no total pela equipe. Você não teve nenhuma visita concluída hoje, mas as meninas movimentaram a agenda: * **Marcela Drummond**: *Visita Agendada - Residencial Leonardo Da Vinci - Imaculada* * **Elania Campos**: *Vi
 
-PASS #15 verdade=202 | quantos negócios foram perdidos esse mês?
->> Neste mês (novembro de 2026), a equipe teve um total de **202 negócios perdidos**. Desse total, **1** era seu: * **Cássia & José Carlos** (ID 48552) — Fechado como perdido em 02/11.
+PASS #2 verdade=14 | quantas visitas a equipe fez ontem?
+>> Fala, Felipe! Ontem (11/11), a equipe realizou **14 visitas** no total. Se precisar de mais algum detalhe sobre essas visitas ou quiser ver a lista, é só dar o grito!
+
+PASS #3 verdade=10 | quantas visitas temos agendadas pra amanhã?
+>> Fala, Tiago! Amanhã (**sexta-feira, 13/11**), temos um total de **10 visitas agendadas** na equipe. Desse total, **3 são suas**: * **09:00** - Confirmar visita (ID: 28752) * **10:00** - Visita Agendada - Be All - Elisa (ID: 28824) * **14:15** - Visita Agendada - Residencial Leona
+
+PASS #4 verdade=38 | quantas visitas foram feitas essa semana?
+>> Fala, Felipe! Beleza? Nesta semana (de segunda-feira, 09/11, até domingo, 15/11), a equipe toda realizou um total de **38 visitas** (tarefas concluídas com "visita" no título). No seu painel individual, não consta nenhuma visita realizada por você ainda neste período. Se tiver al
+
+PASS #5 verdade=64 | quantas visitas foram feitas na semana passada?
+>> Na semana passada (de **02/11** a **08/11/2026**), a equipe realizou um total de **64 visitas**. Para você, Felipe, não consta nenhuma visita concluída registrada nesse período.
+
+PASS #6 verdade=281 | quantas visitas foram realizadas no mês passado?
+>> Fala, Tiago! No mês passado (outubro de 2026), a equipe toda realizou um total de **281 visitas**. Desse total, **42 visitas** foram realizadas por você! Bom trabalho!
+
+PASS #7 verdade=19 | quantas visitas EU fiz esse mês?
+>> Fala, Tiago! Você realizou **19 visitas** neste mês de novembro (de 01/11 a 30/11). Bom ritmo de rua! Se precisar de mais algum detalhe sobre essas visitas, é só chamar.
+
+PASS #8 verdade=14 | quantas visitas o Tiago fez na semana passada?
+>> Fala, Felipe! Beleza? O **Tiago Maron** realizou **14 visitas** na semana passada (no período de 02/11 a 08/11). Se precisar de mais algum detalhe sobre essas visitas ou de outro corretor, é só gritar!
+
+PASS #9 verdade=10 | quantos negócios novos entraram hoje?
+>> Hoje entraram **10 novos negócios** no funil da equipe. Nenhum deles está atribuído a você (ID 1). Aqui estão os negócios que entraram hoje (12/11): • **Rafic De Sousa Halabi** (ID 54698) • **Ingrid Freitas** (ID 54702) • **Daiane Terapeuta** (ID 54706) • **Rosi** (ID 54710) • **
+
+PASS #10 verdade=809 | quantos negócios foram criados em outubro?
+>> Fala, Felipe! Beleza? Em outubro de 2026, foram criados **809 negócios** no total pela equipe.
+
+PASS #11 verdade=6 | quantos negócios novos eu recebi essa semana?
+>> Fala, Tiago! Beleza? Você recebeu **6 novos negócios** nesta semana (de 09/11 a 15/11). Aqui está a lista deles: * **LLC Reformas** (ID 54470) — Criado em 09/11 * **Francisco** (ID 54494) — Criado em 10/11 * **Samuel & Henrique** (ID 54570) — Criado em 10/11 * **Mariana & Bruno**
+
+PASS #12 verdade=0 | quantos leads entraram esse mês?
+>> Fala, Felipe! Beleza? Dando uma olhada aqui no Bitrix24, **não entrou nenhum lead novo** neste mês de novembro (até o momento, dia 12/11/2026). Se precisar que eu puxe o histórico de algum outro período ou que verifique alguma outra informação, é só gritar!
+
+PASS #13 verdade=7 | quantos contatos novos foram cadastrados ontem?
+>> Fala, Tiago! Ontem (quarta-feira, 11/11), foram cadastrados **7 novos contatos** no sistema pela equipe. Desses 7, **1 foi cadastrado por você**: * **Wilma Reis** (ID 42186) Os outros 6 contatos foram distribuídos entre o restante da equipe. Se precisar de mais algum detalhe sobr
+
+PASS #14 verdade=799 | quantos negócios estão ganhos no total?
+>> Fala, Felipe! Beleza? No total, nós temos **799 negócios ganhos** no Bitrix24 da FQ Imóveis. Se precisar de mais algum detalhe ou de um recorte específico (como por período ou corretor), é só dar o grito!
+
+PASS #15 verdade=203 | quantos negócios foram perdidos esse mês?
+>> Fala, Felipe! Neste mês de novembro, a equipe teve um total de **203 negócios perdidos** no Bitrix24. Desse total, **1** estava sob a sua responsabilidade: * **Cássia & José Carlos** (ID 48552) — Fechado como perdido em 02/11.
+
+PASS #16 verdade=40 | quantas tarefas foram criadas hoje?
+>> Fala, Tiago! Tudo certo por aí? Hoje foram criadas **40 tarefas** no total para toda a equipe. Desse total, nenhuma foi atribuída a você ou criada por você hoje. Se precisar de ajuda para agendar alguma coisa ou quiser que eu puxe mais detalhes, é só dar o grito!
+
+PASS #17 verdade=97 | quantas tarefas foram concluídas ontem?
+>> Fala, Felipe! Beleza? Ontem (quarta-feira, 11/11), a equipe concluiu um total de **97 tarefas**. Desse total, nenhuma estava sob sua responsabilidade direta. Se precisar de ajuda para listar quais foram ou detalhar alguma delas, só dar o grito!
+
+PASS #18 verdade=0 | quantas ligações foram registradas no crm hoje?
+>> Hoje, **12/11/2026**, o cenário de ligações registradas no CRM é o seguinte: * **Ligações via telefonia integrada (chamadas diretas):** **0** registradas. * **Tarefas de ligação/cadência registradas no CRM:** **6** tarefas criadas hoje. As tarefas de cadência registradas são: * *
 

@@ -234,8 +234,11 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
     case "query_bitrix": {
       // Só leitura: métodos *.list/*.get. Escrita continua no fluxo de confirmação.
       const method = String(args.method ?? "");
-      if (!/^[a-z][a-z0-9_.]*\.(list|get)$/i.test(method) || /\.(add|update|delete|start|finish|batch)\b/i.test(method)) {
-        return { error: `Método não permitido para leitura dinâmica: ${method}. Use apenas *.list ou *.get.` };
+      const allowed =
+        /^[a-z][a-z0-9_.]*\.(list|get|fields|search|searchcontent|getlist|getlistitem)$/i.test(method) ||
+        /^(methods|profile|app\.info)$/i.test(method);
+      if (!allowed || /\.(add|update|delete|start|finish|batch|send|complete|stop|cancel)\b/i.test(method)) {
+        return { error: `Método não permitido para leitura dinâmica: ${method}. Use métodos de leitura (*.list, *.get, *.fields, *.search).` };
       }
       const params: Record<string, unknown> = {};
       let filterObj: Record<string, unknown> | null = null;
@@ -302,13 +305,18 @@ async function executeTool(name: string, args: FnArgs, users: Awaited<ReturnType
 }
 
 /** Responde perguntas da equipe com function calling sobre a API real do Bitrix24. */
-export async function answerWithBitrixTools(message: string, staff: StaffMember | null): Promise<string | null> {
+export async function answerWithBitrixTools(
+  message: string,
+  staff: StaffMember | null,
+  history: { role: "user" | "model"; text: string }[] = [],
+): Promise<string | null> {
   const env = serverEnv();
   const ai = genaiClient();
   const users = await listBitrixUsers().catch(() => []);
   const hoje = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "full", timeStyle: "short" });
 
   const contents: { role: string; parts: Record<string, unknown>[] }[] = [
+    ...history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
     { role: "user", parts: [{ text: `Corretor: ${staff?.name ?? "desconhecido"} (Bitrix ID ${staff?.bitrixId ?? "?"})\nData/hora atual: ${hoje}\nPergunta: ${message}` }] },
   ];
 

@@ -40,36 +40,51 @@ export function normalizePhone(value: string | null | undefined): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-export async function b24Call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  const base = process.env.B24_WEBHOOK_URL;
-  if (!base) throw new Error("B24_WEBHOOK_URL não configurada");
-  const res = await fetch(`${base.replace(/\/$/, "")}/${method}.json`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-    signal: AbortSignal.timeout(B24_TIMEOUT_MS),
-  });
-  const data = (await res.json().catch(() => null)) as { result?: T; total?: number; error?: string; error_description?: string } | null;
-  if (!res.ok || data?.error) {
-    throw new Error(`Bitrix ${method} falhou: ${data?.error_description ?? data?.error ?? res.status}`);
+const B24_READ_RETRYABLE = /\.(list|get|fields|search|searchcontent)$/i;
+const WRITE_LIKE = /\.(add|update|delete|complete|start|finish|batch|send|stop|cancel)\b/i;
+
+async function b24Fetch(base: string, method: string, params: Record<string, unknown>) {
+  // Leituras retentam em throttle/5xx/página HTML (Bitrix devolve HTML com 200 às vezes).
+  const canRetry = B24_READ_RETRYABLE.test(method) && !WRITE_LIKE.test(method);
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= (canRetry ? 2 : 0); attempt++) {
+    try {
+      const res = await fetch(`${base}/${method}.json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(B24_TIMEOUT_MS),
+      });
+      const data = (await res.json().catch(() => null)) as { result?: unknown; total?: number; error?: string; error_description?: string } | null;
+      const transient = res.status === 429 || res.status >= 500 || (res.ok && data === null);
+      if (!res.ok || data?.error) {
+        if (!transient) throw new Error(`Bitrix ${method} falhou: ${data?.error_description ?? data?.error ?? res.status}`);
+        lastError = new Error(`Bitrix ${method} erro transitório: ${data?.error_description ?? data?.error ?? res.status}`);
+      } else if (data === null) {
+        lastError = new Error(`Bitrix ${method} resposta inválida (não-JSON)`);
+      } else {
+        return data;
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+    }
+    if (canRetry && attempt < 2) await new Promise((r) => setTimeout(r, 800 * (attempt + 1) + Math.random() * 400));
   }
+  throw lastError ?? new Error(`Bitrix ${method} falhou`);
+}
+
+export async function b24Call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  const base = process.env.B24_WEBHOOK_URL?.replace(/\/$/, "");
+  if (!base) throw new Error("B24_WEBHOOK_URL não configurada");
+  const data = await b24Fetch(base, method, params);
   return data?.result as T;
 }
 
 /** Igual b24Call, mas retorna também o campo `total` que o Bitrix manda nas listas. */
 export async function b24CallWithTotal<T>(method: string, params: Record<string, unknown> = {}): Promise<{ result: T; total: number | null }> {
-  const base = process.env.B24_WEBHOOK_URL;
+  const base = process.env.B24_WEBHOOK_URL?.replace(/\/$/, "");
   if (!base) throw new Error("B24_WEBHOOK_URL não configurada");
-  const res = await fetch(`${base.replace(/\/$/, "")}/${method}.json`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-    signal: AbortSignal.timeout(B24_TIMEOUT_MS),
-  });
-  const data = (await res.json().catch(() => null)) as { result?: T; total?: number; error?: string; error_description?: string } | null;
-  if (!res.ok || data?.error) {
-    throw new Error(`Bitrix ${method} falhou: ${data?.error_description ?? data?.error ?? res.status}`);
-  }
+  const data = await b24Fetch(base, method, params);
   return { result: data?.result as T, total: typeof data?.total === "number" ? data.total : null };
 }
 
@@ -526,13 +541,16 @@ Regras:
 - interest: resumo do que o cliente procura (ex: "3 quartos na Pampulha até 600 mil").
 - notes: demais detalhes úteis (ex: corretor responsável, origem do lead).`;
 
-export async function extractStaffAction(text: string): Promise<StaffAction | null> {
+export async function extractStaffAction(text: string, history: { role: string; text: string }[] = []): Promise<StaffAction | null> {
   const env = serverEnv();
   const ai = genaiClient();
   const today = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const ctx = history.length
+    ? `\n\nContexto recente da conversa (use para resolver referências como "o dele", "essa tarefa"):\n${history.slice(-8).map((t) => `${t.role === "model" ? "Assistente" : "Corretor"}: ${t.text.slice(0, 300)}`).join("\n")}\n\n`
+    : "\n\n";
   const response = await ai.models.generateContent({
     model: env.GEMINI_MODEL,
-    contents: [{ text: `${EXTRACTION_PROMPT.replace("%TODAY%", today)}\n\nPedido: ${text}` }],
+    contents: [{ text: `${EXTRACTION_PROMPT.replace("%TODAY%", today)}${ctx}Pedido: ${text}` }],
     config: { temperature: 0, responseMimeType: "application/json" },
   });
   const raw = response.text?.trim() ?? "";
@@ -637,7 +655,42 @@ function describeAction(action: StaffAction, staffName: string): string {
   return `📋 Cadastrar cliente ${action.clientName}${phone}${interest}.\n\nConfirma? (responde "sim" ou corrige)`;
 }
 
-export function confirmMessageFor(action: StaffAction, staffName: string): string {
+let dealStagesCache: { ts: number; stages: Array<{ STATUS_ID: string; NAME: string }> } | null = null;
+
+/** Etapas do funil de negócios, com cache de 10min (mudam raramente). */
+async function listDealStages(): Promise<Array<{ STATUS_ID: string; NAME: string }>> {
+  if (dealStagesCache && Date.now() - dealStagesCache.ts < USERS_CACHE_TTL_MS) return dealStagesCache.stages;
+  const stages = await b24Call<Array<{ STATUS_ID: string; NAME: string }>>("crm.status.list", { filter: { ENTITY_ID: "DEAL_STAGE" } }).catch(() => []);
+  dealStagesCache = { ts: Date.now(), stages };
+  return stages;
+}
+
+/** Mensagem de confirmação, enriquecida com o estado atual do registro quando possível. */
+export async function confirmMessageFor(action: StaffAction, staffName: string): Promise<string> {
+  if (action.kind === "deal_stage") {
+    try {
+      const ref = action.dealRef.replace(/^#/, "").trim();
+      const deal = /^\d+$/.test(ref)
+        ? await b24Call<{ ID: string; TITLE: string; STAGE_ID: string }>("crm.deal.get", { id: Number(ref) }).catch(() => null)
+        : null;
+      if (deal?.STAGE_ID) {
+        const statuses = await listDealStages();
+        const cur = statuses?.find((s) => s.STATUS_ID === deal.STAGE_ID)?.NAME ?? deal.STAGE_ID;
+        return `📋 Mudar negócio #${deal.ID} "${deal.TITLE}": etapa atual "${cur}" → "${action.stage}".\n\nConfirma? (responde "sim" ou corrige)`;
+      }
+    } catch { /* cai na mensagem simples */ }
+  }
+  if (action.kind === "reschedule_task" && /^\d+$/.test(action.taskRef.replace(/^#/, "").trim())) {
+    try {
+      const t = await b24Call<{ task?: B24Task } | B24Task>("tasks.task.get", { taskId: Number(action.taskRef.replace(/^#/, "")), select: ["ID", "TITLE", "DEADLINE"] }).catch(() => null);
+      const task = (t as { task?: B24Task })?.task ?? (t as B24Task | null);
+      if (task?.id || task?.ID) {
+        const cur = task.deadline ?? task.DEADLINE ?? "sem prazo";
+        const when = action.datetimeText ?? action.datetimeIso ?? "nova data";
+        return `📋 Remarcar tarefa #${task.id ?? task.ID} "${task.title ?? task.TITLE}": prazo atual ${cur} → ${when}.\n\nConfirma? (responde "sim" ou corrige)`;
+      }
+    } catch { /* cai na mensagem simples */ }
+  }
   return describeAction(action, staffName);
 }
 
@@ -745,13 +798,9 @@ export async function executeStaffAction(action: StaffAction, staff: StaffMember
     }
     if (!deal) return `Não encontrei negócio com "${ref}". Me manda o número (#) dele que eu altero.`;
 
-    const statuses = await b24Call<Array<{ ENTITY_ID: string; STATUS_ID: string; NAME: string }>>("crm.status.list", {
-      filter: { ENTITY_ID: "DEAL_STAGE" },
-    }).catch(() => null);
+    const statuses = await listDealStages();
     const wanted = norm(action.stage);
-    const stage = Array.isArray(statuses)
-      ? statuses.find((s) => norm(s.NAME).includes(wanted) || wanted.includes(norm(s.NAME)))
-      : null;
+    const stage = statuses.find((s) => norm(s.NAME).includes(wanted) || wanted.includes(norm(s.NAME))) ?? null;
     if (!stage) {
       const fallback = /ganh|won|sucesso|fechou|fechado|vendeu|venda/.test(wanted) ? "WON" : /perd|lose|lost|fracass/.test(wanted) ? "LOSE" : null;
       if (!fallback) {

@@ -35,6 +35,7 @@ import {
   type StaffAction,
   type StaffMember,
 } from "@/lib/bitrix";
+import { getConvHistory, logCrmAction, rememberTurn } from "@/lib/crm-history";
 import { NextRequest, NextResponse } from "next/server";
 
 function authorized(req: NextRequest) {
@@ -294,6 +295,14 @@ export async function POST(req: NextRequest) {
       if (internal?.id) agentId = internal.id;
     }
 
+    // ── Contexto de conversa persistente (equipe): resolve "e o dela?", "essa tarefa" ──
+    const convHistory = staff ? await getConvHistory(pendingKey, "wa").catch(() => []) : [];
+    const remember = (reply: string | null) => {
+      if (!staff) return;
+      rememberTurn(pendingKey, "wa", agentId, "user", text);
+      if (reply) rememberTurn(pendingKey, "wa", agentId, "model", reply);
+    };
+
     // ── Fluxo de equipe: ações pendentes de confirmação no Bitrix ──
     const pendingStaff = pendingStaffActions.get(pendingKey);
     if (pendingStaff) {
@@ -302,13 +311,28 @@ export async function POST(req: NextRequest) {
         if (isConfirmation(text)) {
           try {
             const reply = await executeStaffAction(pendingStaff.action, pendingStaff.staff);
+            remember(reply);
+            logCrmAction({
+              organizationId, contactKey: pendingKey,
+              staffBitrixId: String(pendingStaff.staff.bitrixId), staffName: pendingStaff.staff.name,
+              kind: pendingStaff.action.kind, payload: pendingStaff.action,
+              result: { reply }, status: "ok",
+            });
             return waRespond(body, { reply });
           } catch (error) {
             console.error("wa_b24_action_failed", error instanceof Error ? error.message : "unknown");
+            logCrmAction({
+              organizationId, contactKey: pendingKey,
+              staffBitrixId: String(pendingStaff.staff.bitrixId), staffName: pendingStaff.staff.name,
+              kind: pendingStaff.action.kind, payload: pendingStaff.action,
+              status: "error",
+            });
             return waRespond(body, { reply: "Não consegui gravar no Bitrix agora. Manda de novo que eu tento outra vez." });
           }
         }
         if (!detectStaffIntent(text)) {
+          remember("Beleza, cancelei. Precisar de algo é só mandar.");
+          logCrmAction({ organizationId, contactKey: pendingKey, staffBitrixId: staff?.bitrixId != null ? String(staff.bitrixId) : undefined, staffName: staff?.name, kind: pendingStaff.action.kind, payload: pendingStaff.action, status: "cancelled" });
           return waRespond(body, { reply: "Beleza, cancelei. Precisar de algo é só mandar." });
         }
       }
@@ -318,10 +342,12 @@ export async function POST(req: NextRequest) {
     if (detectStaffIntent(text)) {
       try {
         if (staff) {
-          const action = await extractStaffAction(text);
+          const action = await extractStaffAction(text, convHistory);
           if (action) {
             pendingStaffActions.set(pendingKey, { action, staff, ts: Date.now() });
-            return waRespond(body, { reply: confirmMessageFor(action, staff.name) });
+            const reply = await confirmMessageFor(action, staff.name);
+            remember(reply);
+            return waRespond(body, { reply });
           }
           return waRespond(body, {
             reply:
@@ -407,8 +433,11 @@ export async function POST(req: NextRequest) {
     if (staff && detectCrmQueryIntent(text)) {
       try {
         const { answerWithBitrixTools } = await import("@/lib/bitrix-agent");
-        const reply = await answerWithBitrixTools(text, staff);
-        if (reply) return waRespond(body, { reply });
+        const reply = await answerWithBitrixTools(text, staff, convHistory);
+        if (reply) {
+          remember(reply);
+          return waRespond(body, { reply });
+        }
       } catch (error) {
         console.error("wa_crm_tools_failed", error instanceof Error ? error.message : "unknown");
       }
@@ -446,6 +475,7 @@ export async function POST(req: NextRequest) {
       const { answer } = agentId
         ? await chatWithAgent(agentId, text, undefined, contactId, crmContext)
         : await chatWithAllAgents(text, undefined, contactId, crmContext);
+      remember(answer);
       return waRespond(body, { reply: answer });
     } catch (error) {
       console.error("wa_message_reply_failed", error instanceof Error ? error.message : "unknown");
